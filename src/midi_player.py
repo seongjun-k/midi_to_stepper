@@ -15,7 +15,7 @@ import mido, serial, threading, time, os, math, queue, subprocess
 PORT        = "COM5"
 BAUD        = 115200
 NUM_MOTORS  = 4
-MIN_STEP_MS = 20
+MIN_STEP_MS = 5
 BANDS       = [(72,127),(60,71),(48,59),(0,47)]
 
 # ═══════════════════════════════════════════════════════════════
@@ -97,15 +97,42 @@ def auto_bands(path, n=NUM_MOTORS, note_min=48):
     bands.reverse()
     return bands
 
+def _build_tempo_map(mid):
+    """트랙 0 기준 전역 템포맵 생성: [(abs_tick, tempo), ...]"""
+    tempo_map = []
+    abs_tick = 0
+    for msg in mid.tracks[0]:
+        abs_tick += msg.time
+        if msg.type == "set_tempo":
+            tempo_map.append((abs_tick, msg.tempo))
+    if not tempo_map:
+        tempo_map = [(0, 500000)]
+    return tempo_map
+
+def _ticks_to_ms(tick, tempo_map, tpb):
+    ms = 0.0
+    prev_tick, prev_tempo = 0, 500000
+    for t, tp in tempo_map:
+        if tick <= t:
+            break
+        dt = min(tick, t) - prev_tick
+        ms += dt * prev_tempo / (tpb * 1000.0)
+        prev_tick, prev_tempo = t, tp
+    ms += (tick - prev_tick) * prev_tempo / (tpb * 1000.0)
+    return ms
+
 def parse_midi(path, bands=BANDS, min_ms=MIN_STEP_MS):
     mid = mido.MidiFile(path)
     tpb = mid.ticks_per_beat
+    tempo_map = _build_tempo_map(mid)
+
     all_notes = []
     for track in mid.tracks:
-        pending, tempo, t_ms = {}, 500000, 0.0
+        pending = {}
+        abs_tick = 0
         for msg in track:
-            t_ms += msg.time * tempo / (tpb * 1000.0)
-            if msg.type == "set_tempo": tempo = msg.tempo
+            abs_tick += msg.time
+            t_ms = _ticks_to_ms(abs_tick, tempo_map, tpb)
             if msg.type == "note_on" and msg.velocity > 0:
                 pending[msg.note] = t_ms
             elif msg.type == "note_off" or (
@@ -114,6 +141,7 @@ def parse_midi(path, bands=BANDS, min_ms=MIN_STEP_MS):
                     s = pending.pop(msg.note)
                     if t_ms - s > 5:
                         all_notes.append((s, msg.note, t_ms - s))
+
     if not all_notes: return [], 0.0
     total_ms = max(s+d for s,_,d in all_notes)
     tracks   = [[(s,n,d) for s,n,d in all_notes if lo<=n<=hi]
@@ -154,7 +182,12 @@ class SerialWriter:
     def send(self, freqs):
         self.q.put(("F"+",".join(str(f) for f in freqs)+"\n").encode())
 
-    def stop(self): self.q.put(b"S\n")
+    def stop(self):
+        # 큐에 남은 명령 모두 비우고 정지 명령 전송
+        while not self.q.empty():
+            try: self.q.get_nowait()
+            except: break
+        self.q.put(b"S\n")
 
     def _loop(self):
         while True:
@@ -188,7 +221,10 @@ class Player:
         self._thread  = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
-    def pause(self):  self._pause_ev.clear(); self.writer.stop()
+    def pause(self):
+        self._pause_ev.clear()
+        self.writer.stop()  # 큐 비우고 즉시 정지 명령
+
     def resume(self): self._pause_ev.set()
 
     @property
