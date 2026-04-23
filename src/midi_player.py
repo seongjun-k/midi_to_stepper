@@ -14,9 +14,9 @@ import mido, serial, threading, time, os, math, queue, subprocess
 # ═══════════════════════════════════════════════════════════════
 PORT        = "COM5"
 BAUD        = 115200
-NUM_MOTORS  = 4
+NUM_MOTORS  = 6
 MIN_STEP_MS = 5
-BANDS       = [(72,127),(60,71),(48,59),(0,47)]
+BANDS       = [(96,127),(84,95),(72,83),(60,71),(48,59),(0,47)]
 
 # ═══════════════════════════════════════════════════════════════
 #  QHD DPI 스케일 감지
@@ -52,8 +52,8 @@ T = {
     "track_fg":  "#3182F6",
 }
 
-MOTOR_COLORS = ["#3182F6","#00C471","#F59E0B","#8B5CF6"]
-MOTOR_NAMES  = ["고음","중고음","중저음","저음"]
+MOTOR_COLORS = ["#3182F6","#00C471","#F59E0B","#8B5CF6","#EC4899","#14B8A6"]
+MOTOR_NAMES  = ["고음1","고음2","중고음","중저음","저음1","저음2"]
 
 F     = {}
 _SANS = "Malgun Gothic"
@@ -183,7 +183,6 @@ class SerialWriter:
         self.q.put(("F"+",".join(str(f) for f in freqs)+"\n").encode())
 
     def stop(self):
-        # 큐에 남은 명령 모두 비우고 정지 명령 전송
         while not self.q.empty():
             try: self.q.get_nowait()
             except: break
@@ -223,7 +222,7 @@ class Player:
 
     def pause(self):
         self._pause_ev.clear()
-        self.writer.stop()  # 큐 비우고 즉시 정지 명령
+        self.writer.stop()
 
     def resume(self): self._pause_ev.set()
 
@@ -318,7 +317,6 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
 
-        # ── 폰트 감지 ────────────────────────────────────────────
         def _ff(name, fallback):
             return name if name in tkfont.families() else fallback
 
@@ -348,7 +346,7 @@ class App(tk.Tk):
             windll.shcore.SetProcessDpiAwareness(2)
         except: pass
 
-        W, H = dp(1000), dp(820)
+        W, H = dp(1000), dp(900)
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         self.geometry(f"{W}x{H}+{(sw-W)//2}+{(sh-H)//2}")
         self.minsize(W, H)
@@ -365,7 +363,6 @@ class App(tk.Tk):
         self._build()
         self.after(200, self._poll)
 
-    # ── 레이아웃 ─────────────────────────────────────────────────
     def _build(self):
         canvas = tk.Canvas(self, bg=T["bg"], highlightthickness=0)
         vsb    = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
@@ -391,7 +388,6 @@ class App(tk.Tk):
         self._build_motor_card(P)
         self._build_log_card(P)
 
-    # ── ① 헤더 ───────────────────────────────────────────────────
     def _build_header(self, P):
         f = tk.Frame(self.main, bg=T["bg"])
         f.pack(fill="x", padx=P, pady=(dp(32), dp(4)))
@@ -402,7 +398,6 @@ class App(tk.Tk):
                  bg=T["bg"], fg=T["text_sub"],
                  font=F["body"]).pack(side="left", padx=dp(16), pady=dp(6))
 
-    # ── ② 연결 카드 ──────────────────────────────────────────────
     def _build_connect_card(self, P):
         card  = Card(self.main); card.pack(fill="x", padx=P, pady=dp(6))
         inner = tk.Frame(card, bg=T["card"])
@@ -436,7 +431,6 @@ class App(tk.Tk):
                  bg=T["card"], fg=T["text_sub"],
                  font=F["sub"]).pack(side="right")
 
-    # ── ③ 펌웨어 업로드 카드 ─────────────────────────────────────
     def _build_upload_card(self, P):
         card  = Card(self.main); card.pack(fill="x", padx=P, pady=dp(6))
         inner = tk.Frame(card, bg=T["card"])
@@ -471,7 +465,6 @@ class App(tk.Tk):
                    bg=T["border"], fg=T["text_sub"]
                    ).pack(side="left")
 
-    # ── ④ 파일 카드 ──────────────────────────────────────────────
     def _build_file_card(self, P):
         card  = Card(self.main); card.pack(fill="x", padx=P, pady=dp(6))
         inner = tk.Frame(card, bg=T["card"])
@@ -494,7 +487,6 @@ class App(tk.Tk):
                                   font=F["sub"], anchor="w")
         self.file_info.pack(fill="x")
 
-    # ── ⑤ 플레이어 카드 ──────────────────────────────────────────
     def _build_player_card(self, P):
         card  = Card(self.main); card.pack(fill="x", padx=P, pady=dp(6))
         inner = tk.Frame(card, bg=T["card"])
@@ -532,7 +524,6 @@ class App(tk.Tk):
         for b in (self.btn_play, self.btn_pause, self.btn_stop):
             b.pack(side="left", padx=dp(8))
 
-    # ── ⑥ 모터 상태 카드 ─────────────────────────────────────────
     def _build_motor_card(self, P):
         card  = Card(self.main); card.pack(fill="x", padx=P, pady=dp(6))
         inner = tk.Frame(card, bg=T["card"])
@@ -581,7 +572,7 @@ class App(tk.Tk):
     def _relayout_motors(self, event=None):
         w = self.motor_wrap.winfo_width()
         if w < 10: return
-        MIN_CARD_W   = dp(180)
+        MIN_CARD_W   = dp(160)
         cols_per_row = max(1, min(NUM_MOTORS, w // MIN_CARD_W))
         for col in self._motor_cols:
             col.grid_forget()
@@ -594,7 +585,6 @@ class App(tk.Tk):
         for c in range(cols_per_row, NUM_MOTORS):
             self.motor_wrap.columnconfigure(c, weight=0)
 
-    # ── ⑦ 로그 카드 ──────────────────────────────────────────────
     def _build_log_card(self, P):
         card  = Card(self.main)
         card.pack(fill="x", padx=P, pady=(dp(6), dp(32)))
@@ -621,7 +611,6 @@ class App(tk.Tk):
         self.log.tag_config("info", foreground=T["primary"])
         self.log.tag_config("warn", foreground=T["warn"])
 
-    # ── 시크바 ───────────────────────────────────────────────────
     def _draw_seek(self, _=None):
         c = self.seek_canvas
         w = c.winfo_width(); h = dp(10)
@@ -658,7 +647,6 @@ class App(tk.Tk):
             self.cur_lbl.config(text=ms_to_str(r*self.total_ms))
         self._draw_seek()
 
-    # ── 파일 / 연결 / 펌웨어 ─────────────────────────────────────
     def _browse(self):
         path = filedialog.askopenfilename(
             filetypes=[("MIDI","*.mid *.midi"),("All","*.*")])
@@ -672,10 +660,9 @@ class App(tk.Tk):
             self.file_info.config(
                 text=f"이벤트 {len(self.events)}개  ·  {ms_to_str(self.total_ms)}")
             self.tot_lbl.config(text=f"/ {ms_to_str(self.total_ms)}")
-            band_names = ["고음","중고음","중저음","저음"]
             for i, (lo, hi) in enumerate(bands):
                 self._log(
-                    f"  M{i} [{band_names[i]}]  "
+                    f"  M{i} [{MOTOR_NAMES[i]}]  "
                     f"노트 {lo}({freq_to_name(note_to_freq(lo))}) "
                     f"~ {hi}({freq_to_name(note_to_freq(hi))})", "info")
             self._log(f"로드 완료  ({len(self.events)}개)", "ok")
@@ -762,7 +749,6 @@ class App(tk.Tk):
         else:
             log(f"재연결 실패: {r}", "err")
 
-    # ── 재생 제어 ─────────────────────────────────────────────────
     def _play(self):
         if not self.events:
             self._log("MIDI 파일을 먼저 선택하세요.", "warn"); return
@@ -788,7 +774,6 @@ class App(tk.Tk):
     def _on_end(self):
         self._stop(); self._log("재생 완료 ✓", "ok")
 
-    # ── 실시간 갱신 ──────────────────────────────────────────────
     def _upd_pos(self, ms):
         self.cur_ms = ms
         self.cur_lbl.config(text=ms_to_str(ms))
