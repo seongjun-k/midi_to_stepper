@@ -1,0 +1,11 @@
+﻿.venv/
+Include/
+Lib/
+Scripts/
+pyvenv.cfg
+output/
+미사용/
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
