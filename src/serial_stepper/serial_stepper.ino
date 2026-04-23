@@ -1,13 +1,13 @@
 // serial_stepper.ino
-// PC에서 "F262,440,131,196\n" 형식으로 주파수 전송
+// PC에서 "F262,440,131,196,330,523\n" 형식으로 주파수 전송
 // 한 번만 업로드하면 끝
 
-#define NUM_MOTORS   4
+#define NUM_MOTORS   6
 #define FREQ_MIN     100   // Hz 하한 (100Hz 미만은 REST 처리)
 #define FREQ_MAX     4000  // Hz 상한 (스텝모터 물리 한계)
 
-const byte stepPins[NUM_MOTORS] = { 2,  3,  4, 12};
-const byte  dirPins[NUM_MOTORS] = { 5,  6,  7, 13};
+const byte stepPins[NUM_MOTORS] = { 2,  3,  4, 12, 21, 23};
+const byte  dirPins[NUM_MOTORS] = { 5,  6,  7, 13, 22, 24};
 
 struct Motor {
   unsigned long lastToggle;
@@ -36,15 +36,15 @@ void applyFreq(byte m, uint16_t freq) {
 }
 
 // ── 명령 파싱 ────────────────────────────────────────────────
-// "F262,440,131,196"  → 4모터 주파수 설정
-// "S"                 → 전체 정지
+// "F262,440,131,196,330,523"  → 6모터 주파수 설정
+// "S"                         → 전체 정지
 void handleCmd(char* cmd) {
   if (cmd[0] == 'S') {
     for (byte i = 0; i < NUM_MOTORS; i++) applyFreq(i, 0);
     return;
   }
   if (cmd[0] == 'F') {
-    uint16_t freqs[NUM_MOTORS] = {0, 0, 0, 0};
+    uint16_t freqs[NUM_MOTORS] = {0, 0, 0, 0, 0, 0};
     byte     idx = 0;
     char*    p   = cmd + 1;
     while (*p && idx < NUM_MOTORS) {
