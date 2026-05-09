@@ -10,6 +10,7 @@ STEPPER MIDI KIOSK
 """
 
 import sys, os, io, time, threading, math, urllib.request, tempfile, random
+from collections import deque
 import pygame
 import pygame.gfxdraw
 
@@ -62,6 +63,7 @@ SERIAL_BAUD  = 115200
 NUM_MOTORS   = 4
 SCREEN_W     = 1280
 SCREEN_H     = 720
+OSC_BUF_LEN  = 120
 CACHE_DIR    = os.path.join(tempfile.gettempdir(), "stepper_midi_cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
@@ -155,11 +157,11 @@ def make_demo_song(length_ms=30000):
     return song, durs
 
 # ── 유틸 ──────────────────────────────────────────────────────────────────────
-def note_to_freq(note):
+def note_to_freq(note: int) -> int:
     if note <= 0: return 0
     return round(440.0 * (2.0 ** ((note - 69) / 12.0)))
 
-def freq_to_name(f):
+def freq_to_name(f: int) -> str:
     if f == 0: return "REST"
     names = {65:"C2",73:"D2",82:"E2",87:"F2",98:"G2",110:"A2",123:"B2",
              131:"C3",147:"D3",165:"E3",175:"F3",196:"G3",220:"A3",247:"B3",
@@ -182,7 +184,7 @@ def draw_text_centered(surf, text, font, color, cx, cy):
     r = rendered.get_rect(center=(cx, cy))
     surf.blit(rendered, r)
 
-def fetch_album_art(url, size=(180, 180)):
+def fetch_album_art(url: str, size=(180, 180)):
     try:
         req = urllib.request.urlopen(url, timeout=5)
         data = req.read()
@@ -215,7 +217,7 @@ def make_demo_album_art(size=(90, 90)):
     return s
 
 # ── MIDI 파싱 ─────────────────────────────────────────────────────────────────
-def parse_midi(path):
+def parse_midi(path: str) -> list:
     mid = mido.MidiFile(path)
     tpb = mid.ticks_per_beat
     all_tracks = []
@@ -238,7 +240,7 @@ def parse_midi(path):
             all_tracks.append(notes)
     return all_tracks
 
-def build_timeline(tracks, min_ms=30):
+def build_timeline(tracks: list, min_ms=30) -> tuple:
     times = set()
     for tr in tracks:
         for s, f, d in tr:
@@ -261,7 +263,7 @@ def build_timeline(tracks, min_ms=30):
 # ── 시리얼 연결 ───────────────────────────────────────────────────────────────
 class FakeSerial:
     """아두이노 없이 시뮬레이션하는 더미 시리얼 (--demo 또는 pyserial 미설치 시 사용)"""
-    def write(self, d): pass   # 실제 전송 안 함
+    def write(self, d): pass
     def close(self): pass
 
 def open_serial():
@@ -283,7 +285,7 @@ def open_serial():
 
 # ── 플레이어 스레드 ───────────────────────────────────────────────────────────
 class StepperPlayer:
-    def __init__(self, song, durs, ser):
+    def __init__(self, song: list, durs: list, ser):
         self.song, self.durs, self.ser = song, durs, ser
         self.step = 0
         self.total = len(song)
@@ -311,7 +313,7 @@ class StepperPlayer:
                 self.cur_freqs = list(slot)
                 self.elapsed_ms = acc
             cmd = (",".join(str(f) for f in slot) + "\n").encode()
-            try: self.ser.write(cmd)   # FakeSerial이면 아무 동작 안 함
+            try: self.ser.write(cmd)
             except: pass
             time.sleep(dur)
             acc += self.durs[idx]
@@ -327,7 +329,7 @@ class StepperPlayer:
         try: self.ser.write((",".join(["0"]*NUM_MOTORS)+"\n").encode())
         except: pass
 
-    def get_state(self):
+    def get_state(self) -> tuple:
         with self.lock:
             return self.step, list(self.cur_freqs), self.elapsed_ms
 
@@ -347,7 +349,7 @@ class KioskApp:
         self.clock = pygame.time.Clock()
 
         if not DEMO_MODE:
-            self.yt = YTMusic()  # 인증 파일 없이 공개 카탈로그 검색
+            self.yt = YTMusic()
         self.ser = open_serial()
 
         self.state = self.STATE_SEARCH
@@ -358,7 +360,9 @@ class KioskApp:
         self.album_arts = {}
         self.player = None
         self.smooth_freqs = [0.0] * NUM_MOTORS
-        self.osc_buffers = [[0.0]*120 for _ in range(NUM_MOTORS)]
+        # fix: list 슬라이싱 → deque(maxlen) 으로 매 프레임 복사 제거
+        self.osc_buffers = [deque([0.0] * OSC_BUF_LEN, maxlen=OSC_BUF_LEN)
+                            for _ in range(NUM_MOTORS)]
         self.now_playing = None
         self.error_msg = ""
         self.error_timer = 0
@@ -366,16 +370,15 @@ class KioskApp:
         self.loading_progress = 0.0
 
     def _init_fonts(self):
-        # fix: 상대경로 → 절대경로로 수정 (Windows/Linux/Mac 모두 지원)
         windir = os.environ.get("WINDIR", "C:\\Windows")
         korean_fonts = [
-            os.path.join(windir, "Fonts", "malgunbd.ttf"),   # 맑은 고딕 Bold (Windows)
-            os.path.join(windir, "Fonts", "malgun.ttf"),     # 맑은 고딕 (Windows)
-            os.path.join(windir, "Fonts", "gulim.ttc"),      # 굴림 (Windows)
-            os.path.join(windir, "Fonts", "batang.ttc"),     # 바탕 (Windows)
-            "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",  # Linux
-            "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",      # Linux
-            "/System/Library/Fonts/AppleSDGothicNeo.ttc",           # macOS
+            os.path.join(windir, "Fonts", "malgunbd.ttf"),
+            os.path.join(windir, "Fonts", "malgun.ttf"),
+            os.path.join(windir, "Fonts", "gulim.ttc"),
+            os.path.join(windir, "Fonts", "batang.ttc"),
+            "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
+            "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+            "/System/Library/Fonts/AppleSDGothicNeo.ttc",
         ]
         kf = None
         for fp in korean_fonts:
@@ -383,7 +386,6 @@ class KioskApp:
                 kf = fp
                 break
 
-        # pygame SysFont fallback
         if kf is None:
             for name in ["malgun gothic", "nanum gothic", "gulim", "batang"]:
                 f = pygame.font.match_font(name)
@@ -416,10 +418,7 @@ class KioskApp:
             if ev.type == pygame.QUIT:
                 self._cleanup(); sys.exit()
 
-            # ── 한글 IME 조합 완료 문자 입력 (TEXTINPUT) ──────────────────────
-            # KEYDOWN의 ev.unicode는 한글 조합 중간 상태를 잘못 처리할 수 있음.
-            # pygame.TEXTINPUT은 IME가 조합을 완료한 최종 문자를 전달하므로
-            # 한글/일본어/중국어 등 IME 입력에 반드시 필요함.
+            # 한글 IME: TEXTINPUT으로만 처리 (KEYDOWN fallback 제거 → 영문 중복 입력 방지)
             if ev.type == pygame.TEXTINPUT:
                 if self.state == self.STATE_SEARCH and len(self.query) < 40:
                     self.query += ev.text
@@ -439,10 +438,8 @@ class KioskApp:
                         self._do_search()
                     elif ev.key == pygame.K_BACKSPACE:
                         self.query = self.query[:-1]
-                    # 영문/숫자/특수문자는 TEXTINPUT이 처리하지만,
-                    # pygame.TEXTINPUT이 발생하지 않는 환경을 위한 fallback
+                    # TEXTINPUT이 발생하지 않는 환경 fallback (영문/숫자만, 한글 제외)
                     elif ev.unicode and ev.unicode.isprintable() and len(self.query) < 40:
-                        # TEXTINPUT과 중복 입력 방지: 한글(Unicode 범위 AC00-D7A3)은 건너뜀
                         if not ('\uAC00' <= ev.unicode <= '\uD7A3'):
                             self.query += ev.unicode
 
@@ -461,10 +458,18 @@ class KioskApp:
                         elif self.player and self.player.finished:
                             self._replay()
 
-            if ev.type == pygame.MOUSEBUTTONDOWN:
-                self._handle_click(ev.pos)
+            # fix: 마우스 휠(버튼4·5)로 곡 선택되던 문제 → MOUSEWHEEL 이벤트로 분리
+            if ev.type == pygame.MOUSEWHEEL:
+                if self.state == self.STATE_RESULTS:
+                    self.selected_idx = max(
+                        0, min(len(self.search_results) - 1, self.selected_idx - ev.y)
+                    )
 
-    def _handle_click(self, pos):
+            if ev.type == pygame.MOUSEBUTTONDOWN:
+                if ev.button not in (4, 5):  # 휠 클릭 제외
+                    self._handle_click(ev.pos)
+
+    def _handle_click(self, pos: tuple):
         x, y = pos
         if self.state == self.STATE_RESULTS:
             for i in range(len(self.search_results)):
@@ -496,10 +501,18 @@ class KioskApp:
                         vid = r["videoId"]
                         self.album_arts[vid] = make_demo_album_art((90, 90))
                 else:
-                    results = self.yt.search(self.query, filter="songs", limit=5)
-                    self.search_results = results[:5]
+                    # fix: filter="songs" 제거 → 한국 IP에서 빈 결과 반환 버그 우회
+                    raw = self.yt.search(self.query, limit=15)
+                    results = [r for r in raw
+                               if r.get("resultType") in ("song", "video")
+                               and r.get("videoId")][:5]
+                    if not results:
+                        results = [r for r in raw if r.get("videoId")][:5]
+                    self.search_results = results
+                    if not self.search_results:
+                        raise ValueError(f"'{self.query}'에 대한 재생 가능한 결과가 없습니다")
                     for r in self.search_results:
-                        vid = r.get("videoId","")
+                        vid = r.get("videoId", "")
                         thumbs = r.get("thumbnails", [])
                         if thumbs and vid:
                             art = fetch_album_art(thumbs[-1]["url"], (90, 90))
@@ -515,19 +528,20 @@ class KioskApp:
         threading.Thread(target=_search, daemon=True).start()
 
     # ── 로딩 + 변환 ───────────────────────────────────────────────────────────
-    def _start_loading(self, result):
+    def _start_loading(self, result: dict):
         self.state = self.STATE_LOADING
         self.loading_progress = 0.0
         video_id = result.get("videoId", "")
         title    = result.get("title", "Unknown")
         artists  = result.get("artists", [])
-        artist   = artists[0]["name"] if artists else "Unknown"
+        # fix: artists 없는 경우 author / channelId fallback
+        artist   = (artists[0]["name"] if artists
+                    else result.get("author") or result.get("channelId", "Unknown"))
         art_surf = self.album_arts.get(video_id)
 
         def _convert():
             try:
                 if DEMO_MODE:
-                    # 데모: 실제 다운로드/변환 없이 가짜 진행률만 표시
                     steps = [
                         (0.2, "⬇  다운로드 중... (데모)", 0.6),
                         (0.5, "MIDI 변환 중... (데모)", 0.4),
@@ -543,7 +557,6 @@ class KioskApp:
                     length_ms = (int(parts[0])*60 + int(parts[1])) * 1000 if len(parts)==2 else 30000
                     song, durs = make_demo_song(length_ms)
                 else:
-                    # 실제 모드
                     audio_path = os.path.join(CACHE_DIR, f"{video_id}.mp3")
                     midi_path  = os.path.join(CACHE_DIR, f"{video_id}.mid")
                     url = f"https://music.youtube.com/watch?v={video_id}"
@@ -557,6 +570,9 @@ class KioskApp:
                                                 "preferredcodec": "mp3",
                                                 "preferredquality": "128"}],
                             "outtmpl": audio_path.replace(".mp3",""),
+                            # fix: 한글 파일명 에러 방지
+                            "restrictfilenames": True,
+                            "windowsfilenames": True,
                             "quiet": True, "no_warnings": True,
                         }
                         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -600,7 +616,7 @@ class KioskApp:
 
         threading.Thread(target=_convert, daemon=True).start()
 
-    def _start_player(self, song, durs):
+    def _start_player(self, song: list, durs: list):
         if self.player: self.player.stop()
         self.player = StepperPlayer(song, durs, self.ser)
         self.player.play()
@@ -619,7 +635,6 @@ class KioskApp:
                 target = float(freqs[i]) if i < len(freqs) else 0.0
                 self.smooth_freqs[i] = self.smooth_freqs[i] * 0.85 + target * 0.15
                 self.osc_buffers[i].append(self.smooth_freqs[i])
-                self.osc_buffers[i] = self.osc_buffers[i][-120:]
 
     # ── 그리기 ────────────────────────────────────────────────────────────────
     def draw(self):
@@ -629,14 +644,12 @@ class KioskApp:
         elif self.state == self.STATE_LOADING: self._draw_loading()
         elif self.state == self.STATE_PLAYING: self._draw_playing()
 
-        # 데모 모드 배지
         if DEMO_MODE:
             badge = self.font_xs.render("  DEMO MODE  ", True, BG)
             bw = badge.get_width() + 4
             draw_rounded_rect(self.screen, BLUE, (SCREEN_W - bw - 12, 8, bw, 22), 4)
             self.screen.blit(badge, (SCREEN_W - bw - 10, 12))
 
-        # 에러 토스트
         if self.error_timer > 0:
             alpha = min(255, self.error_timer * 3)
             draw_rounded_rect(self.screen, RED, (SCREEN_W//2-300, 20, 600, 44), 8, alpha)
@@ -697,11 +710,13 @@ class KioskApp:
                                    AMBER_DIM, 105, card_y + 50)
 
             tx = 170
-            title   = r.get("title","")[:48]
-            artists = r.get("artists",[])
-            artist  = artists[0]["name"] if artists else "Unknown"
-            album   = r.get("album",{}).get("name","") if isinstance(r.get("album"),dict) else ""
-            duration= r.get("duration","")
+            title    = r.get("title","")[:48]
+            artists  = r.get("artists",[])
+            # fix: artists 없는 경우 author / channelId fallback
+            artist   = (artists[0]["name"] if artists
+                        else r.get("author") or r.get("channelId", "Unknown"))
+            album    = r.get("album",{}).get("name","") if isinstance(r.get("album"),dict) else ""
+            duration = r.get("duration","")
 
             self.screen.blit(self.font_lg.render(title, True, WHITE if selected else TEXT),
                              (tx, card_y + 12))
@@ -785,7 +800,6 @@ class KioskApp:
 
         pygame.draw.line(self.screen, BORDER, (30, 232), (SCREEN_W-30, 232))
 
-        # 모터 바 그래프
         bar_area_y, bar_area_h = 245, 210
         bar_w = (SCREEN_W - 80) // NUM_MOTORS - 20
         max_freq = 900
@@ -811,12 +825,11 @@ class KioskApp:
             h = self.font_xs.render(f"{int(freq)}Hz" if freq > 0 else "--", True, TEXT_FAINT)
             self.screen.blit(h, (bx + bar_w//2 - h.get_width()//2, bar_area_y + bar_area_h + 36))
 
-        # 오실로스코프
         osc_y, osc_h = 500, 75
         pygame.draw.rect(self.screen, SURF, (30, osc_y, SCREEN_W-60, osc_h), border_radius=8)
         pygame.draw.rect(self.screen, BORDER, (30, osc_y, SCREEN_W-60, osc_h), 1, border_radius=8)
         for m in range(NUM_MOTORS):
-            buf = self.osc_buffers[m]
+            buf = list(self.osc_buffers[m])
             pts = [(30 + int(i*(SCREEN_W-60)/len(buf)),
                     osc_y + osc_h//2 - int((v/max_freq)*(osc_h*0.45)))
                    for i, v in enumerate(buf)]
@@ -824,7 +837,6 @@ class KioskApp:
                 pygame.draw.lines(self.screen, MOTOR_COLS[m%len(MOTOR_COLS)], False, pts, 1)
         self.screen.blit(self.font_xs.render("오실로스코프 (실시간 주파수)", True, TEXT_FAINT), (42, osc_y+4))
 
-        # STOP 버튼
         btn = pygame.Rect(SCREEN_W//2 - 90, SCREEN_H - 68, 180, 46)
         draw_rounded_rect(self.screen, RED, btn, 10)
         draw_text_centered(self.screen, "정지 & 홈으로", self.font_sm, WHITE, SCREEN_W//2, SCREEN_H - 45)
