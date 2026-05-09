@@ -33,7 +33,6 @@ if not DEMO_MODE:
     yt_dlp_mod  = require("yt_dlp", "yt_dlp")
     mido_mod    = require("mido")
 else:
-    # 데모 모드: 라이브러리 없어도 실행 가능
     try:
         from ytmusicapi import YTMusic
         import yt_dlp, mido
@@ -58,7 +57,7 @@ if not DEMO_MODE:
     import yt_dlp, mido
 
 # ── 설정 ──────────────────────────────────────────────────────────────────────
-SERIAL_PORT  = "COM4"       # ← 실제 포트로 변경 (Mac: /dev/ttyUSB0 등)
+SERIAL_PORT  = "COM4"
 SERIAL_BAUD  = 115200
 NUM_MOTORS   = 4
 SCREEN_W     = 1280
@@ -92,52 +91,25 @@ MOTOR_COLS  = [
 
 # ── 데모용 가짜 데이터 ────────────────────────────────────────────────────────
 DEMO_SONGS = [
-    {
-        "videoId": "demo_001",
-        "title": "밤편지",
-        "artists": [{"name": "아이유 (IU)"}],
-        "album": {"name": "Palette"},
-        "duration": "3:36",
-        "thumbnails": [],
-    },
-    {
-        "videoId": "demo_002",
-        "title": "Dynamite",
-        "artists": [{"name": "BTS"}],
-        "album": {"name": "BE"},
-        "duration": "3:19",
-        "thumbnails": [],
-    },
-    {
-        "videoId": "demo_003",
-        "title": "LILAC",
-        "artists": [{"name": "아이유 (IU)"}],
-        "album": {"name": "LILAC"},
-        "duration": "3:37",
-        "thumbnails": [],
-    },
-    {
-        "videoId": "demo_004",
-        "title": "Butter",
-        "artists": [{"name": "BTS"}],
-        "album": {"name": "Butter"},
-        "duration": "2:44",
-        "thumbnails": [],
-    },
-    {
-        "videoId": "demo_005",
-        "title": "Celebrity",
-        "artists": [{"name": "아이유 (IU)"}],
-        "album": {"name": "Celebrity Single"},
-        "duration": "3:02",
-        "thumbnails": [],
-    },
+    {"videoId": "demo_001", "title": "밤편지",
+     "artists": [{"name": "아이유 (IU)"}], "album": {"name": "Palette"},
+     "duration": "3:36", "thumbnails": []},
+    {"videoId": "demo_002", "title": "Dynamite",
+     "artists": [{"name": "BTS"}], "album": {"name": "BE"},
+     "duration": "3:19", "thumbnails": []},
+    {"videoId": "demo_003", "title": "LILAC",
+     "artists": [{"name": "아이유 (IU)"}], "album": {"name": "LILAC"},
+     "duration": "3:37", "thumbnails": []},
+    {"videoId": "demo_004", "title": "Butter",
+     "artists": [{"name": "BTS"}], "album": {"name": "Butter"},
+     "duration": "2:44", "thumbnails": []},
+    {"videoId": "demo_005", "title": "Celebrity",
+     "artists": [{"name": "아이유 (IU)"}], "album": {"name": "Celebrity Single"},
+     "duration": "3:02", "thumbnails": []},
 ]
 
 def make_demo_song(length_ms=30000):
-    """데모용 가짜 MIDI 타임라인 생성 (스텝모터 시뮬레이션)"""
-    scale = [262, 294, 330, 349, 392, 440, 494, 523,
-             587, 659, 698, 784, 880]
+    scale = [262, 294, 330, 349, 392, 440, 494, 523, 587, 659, 698, 784, 880]
     song, durs = [], []
     t = 0
     while t < length_ms:
@@ -146,14 +118,11 @@ def make_demo_song(length_ms=30000):
             if random.random() < 0.3:
                 slot.append(0)
             else:
-                offset = m * 3
-                freq = scale[(t // 400 + offset) % len(scale)]
+                freq = scale[(t // 400 + m * 3) % len(scale)]
                 freq = int(freq * random.uniform(0.98, 1.02))
                 slot.append(freq)
         dur = random.choice([150, 200, 250, 300, 400])
-        song.append(slot)
-        durs.append(dur)
-        t += dur
+        song.append(slot); durs.append(dur); t += dur
     return song, durs
 
 # ── 유틸 ──────────────────────────────────────────────────────────────────────
@@ -172,15 +141,31 @@ def freq_to_name(f: int) -> str:
 
 def fmt_duration(raw) -> str:
     """duration 필드를 '분:초' 문자열로 변환.
-    - 이미 '3:36' 형태 문자열 → 그대로 반환
+    - '데:30' 형태 문자열 → 그대로 반환
     - 정수(초) → 변환
-    - None / 빈값 → '' 반환
+    - None/빈값 → '' 반환
     """
     if not raw:
         return ""
     if isinstance(raw, int):
         return f"{raw // 60}:{raw % 60:02d}"
     return str(raw)
+
+def extract_artist(r: dict) -> str:
+    """
+    ytmusicapi 결과에서 아티스트명 추출.
+    타입별 우선순위: artists[0].name → author → channel → channelId → ''
+    """
+    artists = r.get("artists", [])
+    if artists and isinstance(artists, list):
+        name = artists[0].get("name", "") if isinstance(artists[0], dict) else str(artists[0])
+        if name:
+            return name
+    for key in ("author", "channel", "channelId"):
+        val = r.get(key, "")
+        if val:
+            return str(val)
+    return ""
 
 def draw_rounded_rect(surf, color, rect, radius, alpha=255):
     x, y, w, h = rect
@@ -193,8 +178,7 @@ def draw_rounded_rect(surf, color, rect, radius, alpha=255):
 
 def draw_text_centered(surf, text, font, color, cx, cy):
     rendered = font.render(text, True, color)
-    r = rendered.get_rect(center=(cx, cy))
-    surf.blit(rendered, r)
+    surf.blit(rendered, rendered.get_rect(center=(cx, cy)))
 
 def fetch_album_art(url: str, size=(180, 180)):
     try:
@@ -203,29 +187,21 @@ def fetch_album_art(url: str, size=(180, 180)):
         img = pygame.image.load(io.BytesIO(data))
         return pygame.transform.smoothscale(img, size)
     except:
-        s = pygame.Surface(size)
-        s.fill(SURF2)
-        return s
+        s = pygame.Surface(size); s.fill(SURF2); return s
 
 def make_demo_album_art(size=(90, 90)):
-    """데모용 컬러 앨범 아트 생성"""
     colors = [
-        [(255,80,80),(180,40,40)],
-        [(80,160,255),(40,80,180)],
-        [(80,220,120),(40,140,60)],
-        [(220,160,80),(140,90,30)],
+        [(255,80,80),(180,40,40)], [(80,160,255),(40,80,180)],
+        [(80,220,120),(40,140,60)], [(220,160,80),(140,90,30)],
         [(200,80,220),(120,40,140)],
     ]
     s = pygame.Surface(size)
-    idx = random.randint(0, len(colors)-1)
-    c1, c2 = colors[idx]
+    c1, c2 = random.choice(colors)
     s.fill(c2)
-    pygame.draw.rect(s, c1, (size[0]//4, size[1]//4, size[0]//2, size[1]//2),
-                     border_radius=8)
+    pygame.draw.rect(s, c1, (size[0]//4, size[1]//4, size[0]//2, size[1]//2), border_radius=8)
     font = pygame.font.SysFont("arial", 28, bold=True)
     note = font.render("♪", True, (255,255,255))
-    s.blit(note, (size[0]//2 - note.get_width()//2,
-                  size[1]//2 - note.get_height()//2))
+    s.blit(note, (size[0]//2 - note.get_width()//2, size[1]//2 - note.get_height()//2))
     return s
 
 # ── MIDI 파싱 ─────────────────────────────────────────────────────────────────
@@ -242,7 +218,7 @@ def parse_midi(path: str) -> list:
                 tempo = msg.tempo
             elif msg.type == 'note_on' and msg.velocity > 0:
                 pending[msg.note] = tms
-            elif msg.type in ('note_off',) or (msg.type == 'note_on' and msg.velocity == 0):
+            elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
                 if msg.note in pending:
                     s = pending.pop(msg.note)
                     dur = tms - s
@@ -266,24 +242,22 @@ def build_timeline(tracks: list, min_ms=30) -> tuple:
         for m, tr in enumerate(tracks):
             for s, freq, d in tr:
                 if s <= t < s + d:
-                    slot[m] = freq
-                    break
+                    slot[m] = freq; break
         song.append(slot)
         durs.append(min(dt, 65535))
     return song, durs
 
-# ── 시리얼 연결 ───────────────────────────────────────────────────────────────
+# ── 시리얼 ────────────────────────────────────────────────────────────────────
 class FakeSerial:
-    """아두이노 없이 시뮬레이션하는 더미 시리얼 (--demo 또는 pyserial 미설치 시 사용)"""
     def write(self, d): pass
     def close(self): pass
 
 def open_serial():
     if DEMO_MODE:
-        print("[데모 모드] FakeSerial 사용 (아두이노 전송 없음)")
+        print("[데모 모드] FakeSerial 사용")
         return FakeSerial()
     if not HAS_SERIAL:
-        print("[시리얼 없음] pyserial 미설치 → 시뮬레이션 모드")
+        print("[pyserial 미설치] → 시뮬레이션 모드")
         return FakeSerial()
     try:
         import serial
@@ -295,7 +269,7 @@ def open_serial():
         print(f"[시리얼 실패] {e} → 시뮬레이션 모드")
         return FakeSerial()
 
-# ── 플레이어 스레드 ───────────────────────────────────────────────────────────
+# ── 플레이어 ───────────────────────────────────────────────────────────────────
 class StepperPlayer:
     def __init__(self, song: list, durs: list, ser):
         self.song, self.durs, self.ser = song, durs, ser
@@ -311,8 +285,7 @@ class StepperPlayer:
     def play(self):
         self.running = True
         self.finished = False
-        t = threading.Thread(target=self._run, daemon=True)
-        t.start()
+        threading.Thread(target=self._run, daemon=True).start()
 
     def _run(self):
         acc = 0
@@ -366,14 +339,13 @@ class KioskApp:
 
         self.state = self.STATE_SEARCH
         self.query = ""
-        self.composing = ""      # fix: 한글 IME 조합 중 문자 (TEXTEDITING)
+        self.composing = ""
         self.cursor_blink = 0
         self.search_results = []
         self.selected_idx = 0
         self.album_arts = {}
         self.player = None
         self.smooth_freqs = [0.0] * NUM_MOTORS
-        # fix: list 슬라이싱 → deque(maxlen) 으로 매 프레임 복사 제거
         self.osc_buffers = [deque([0.0] * OSC_BUF_LEN, maxlen=OSC_BUF_LEN)
                             for _ in range(NUM_MOTORS)]
         self.now_playing = None
@@ -395,17 +367,11 @@ class KioskApp:
         ]
         kf = None
         for fp in korean_fonts:
-            if os.path.exists(fp):
-                kf = fp
-                break
-
+            if os.path.exists(fp): kf = fp; break
         if kf is None:
             for name in ["malgun gothic", "nanum gothic", "gulim", "batang"]:
                 f = pygame.font.match_font(name)
-                if f:
-                    kf = f
-                    break
-
+                if f: kf = f; break
         if kf:
             try:
                 self.font_lg   = pygame.font.Font(kf, 26)
@@ -417,7 +383,6 @@ class KioskApp:
                 return
             except Exception as e:
                 print(f"[폰트 오류] {e}")
-
         print("[폰트 경고] 한글 폰트를 찾지 못했습니다.")
         self.font_lg   = pygame.font.SysFont("arial", 26, bold=True)
         self.font_md   = pygame.font.SysFont("arial", 18)
@@ -431,11 +396,9 @@ class KioskApp:
             if ev.type == pygame.QUIT:
                 self._cleanup(); sys.exit()
 
-            # fix: TEXTEDITING → IME 조합 중 문자 추적 (한글 띄어쓰기 미리보기)
             if ev.type == pygame.TEXTEDITING:
                 self.composing = ev.text
 
-            # fix: TEXTINPUT → 확정된 문자 (한글/영문 모두 여기서 처리)
             if ev.type == pygame.TEXTINPUT:
                 self.composing = ""
                 if self.state == self.STATE_SEARCH and len(self.query) < 40:
@@ -456,8 +419,6 @@ class KioskApp:
                         self._do_search()
                     elif ev.key == pygame.K_BACKSPACE:
                         self.query = self.query[:-1]
-                    # fix: TEXTINPUT이 발생하지 않는 환경 fallback
-                    # 한글(\uAC00~\uD7A3) 및 이미 TEXTINPUT으로 처리된 ASCII(\x00~\x7A) 제외
                     elif ev.unicode and ev.unicode.isprintable() and len(self.query) < 40:
                         if not ('\uAC00' <= ev.unicode <= '\uD7A3') \
                            and not ('\x00'  <= ev.unicode <= '\x7A'):
@@ -478,7 +439,6 @@ class KioskApp:
                         elif self.player and self.player.finished:
                             self._replay()
 
-            # fix: 마우스 휠(버튼4·5)로 곡 선택되던 문제 → MOUSEWHEEL 이벤트로 분리
             if ev.type == pygame.MOUSEWHEEL:
                 if self.state == self.STATE_RESULTS:
                     self.selected_idx = max(
@@ -486,7 +446,7 @@ class KioskApp:
                     )
 
             if ev.type == pygame.MOUSEBUTTONDOWN:
-                if ev.button not in (4, 5):  # 휠 클릭 제외
+                if ev.button not in (4, 5):
                     self._handle_click(ev.pos)
 
     def _handle_click(self, pos: tuple):
@@ -518,10 +478,8 @@ class KioskApp:
                     time.sleep(0.8)
                     self.search_results = DEMO_SONGS[:]
                     for r in self.search_results:
-                        vid = r["videoId"]
-                        self.album_arts[vid] = make_demo_album_art((90, 90))
+                        self.album_arts[r["videoId"]] = make_demo_album_art((90, 90))
                 else:
-                    # fix: filter="songs" 제거 → 한국 IP에서 빈 결과 반환 버그 우회
                     raw = self.yt.search(self.query, limit=15)
                     results = [r for r in raw
                                if r.get("resultType") in ("song", "video")
@@ -535,8 +493,7 @@ class KioskApp:
                         vid = r.get("videoId", "")
                         thumbs = r.get("thumbnails", [])
                         if thumbs and vid:
-                            art = fetch_album_art(thumbs[-1]["url"], (90, 90))
-                            self.album_arts[vid] = art
+                            self.album_arts[vid] = fetch_album_art(thumbs[-1]["url"], (90, 90))
                 self.loading_progress = 1.0
                 self.state = self.STATE_RESULTS
                 self.selected_idx = 0
@@ -553,10 +510,7 @@ class KioskApp:
         self.loading_progress = 0.0
         video_id = result.get("videoId", "")
         title    = result.get("title", "Unknown")
-        artists  = result.get("artists", [])
-        # fix: artists 없는 경우 author / channelId fallback
-        artist   = (artists[0]["name"] if artists
-                    else result.get("author") or result.get("channelId", "Unknown"))
+        artist   = extract_artist(result)  # fix: 아티스트 추출 전용 함수 사용
         art_surf = self.album_arts.get(video_id)
 
         def _convert():
@@ -572,8 +526,9 @@ class KioskApp:
                         self.loading_progress = prog
                         self.loading_msg = msg
                         time.sleep(delay)
-                    duration_str = result.get("duration", "3:00")
-                    parts = duration_str.split(":")
+                    duration_raw = result.get("duration", "3:00")
+                    dur_str = fmt_duration(duration_raw)
+                    parts = dur_str.split(":")
                     length_ms = (int(parts[0])*60 + int(parts[1])) * 1000 if len(parts)==2 else 30000
                     song, durs = make_demo_song(length_ms)
                 else:
@@ -590,7 +545,6 @@ class KioskApp:
                                                 "preferredcodec": "mp3",
                                                 "preferredquality": "128"}],
                             "outtmpl": audio_path.replace(".mp3",""),
-                            # fix: 한글 파일명 에러 방지
                             "restrictfilenames": True,
                             "windowsfilenames": True,
                             "quiet": True, "no_warnings": True,
@@ -616,10 +570,8 @@ class KioskApp:
                     song, durs = build_timeline(tracks)
                     self.loading_progress = 1.0
 
-                if art_surf is None:
-                    disp_art = make_demo_album_art((180, 180))
-                else:
-                    disp_art = pygame.transform.smoothscale(art_surf, (180, 180))
+                disp_art = pygame.transform.smoothscale(art_surf, (180, 180)) \
+                           if art_surf else make_demo_album_art((180, 180))
 
                 self.now_playing = {
                     "title": title, "artist": artist,
@@ -682,14 +634,12 @@ class KioskApp:
         draw_text_centered(self.screen, "STEPPER MIDI KIOSK",
                            self.font_hero, AMBER, SCREEN_W//2, 140)
         subtitle = "노래를 검색하면 스텝모터로 연주합니다" + (" — 데모 모드" if DEMO_MODE else "")
-        draw_text_centered(self.screen, subtitle,
-                           self.font_md, TEXT_MUTED, SCREEN_W//2, 195)
+        draw_text_centered(self.screen, subtitle, self.font_md, TEXT_MUTED, SCREEN_W//2, 195)
 
         box = pygame.Rect(SCREEN_W//2 - 340, 270, 680, 64)
         pygame.draw.rect(self.screen, SURF2, box, border_radius=12)
         pygame.draw.rect(self.screen, AMBER if self.cursor_blink < 30 else BORDER, box, 2, border_radius=12)
 
-        # fix: 조합 중인 문자(self.composing)를 커서 앞에 미리보기로 표시
         display_text = self.query + self.composing + ("|" if self.cursor_blink < 30 else " ")
         t_surf = self.font_lg.render(display_text, True, WHITE)
         self.screen.blit(t_surf, (box.x + 20, box.y + 16))
@@ -701,7 +651,6 @@ class KioskApp:
         draw_rounded_rect(self.screen, AMBER if self.query.strip() else AMBER_DIM, btn, 10)
         draw_text_centered(self.screen, "검색  (Enter)", self.font_md,
                            BG if self.query.strip() else TEXT_FAINT, SCREEN_W//2, 386)
-
         draw_text_centered(self.screen, "↑↓ 결과 선택  /  Enter 변환 시작  /  ESC 종료",
                            self.font_xs, TEXT_FAINT, SCREEN_W//2, SCREEN_H - 30)
 
@@ -713,31 +662,26 @@ class KioskApp:
         pygame.draw.line(self.screen, BORDER, (40, 105), (SCREEN_W-40, 105))
 
         for i, r in enumerate(self.search_results):
-            card_y  = 120 + i * 108
+            card_y   = 120 + i * 108
             selected = (i == self.selected_idx)
             pygame.draw.rect(self.screen, SURF2 if selected else SURF,
                              (40, card_y, SCREEN_W-80, 100), border_radius=10)
             pygame.draw.rect(self.screen, AMBER if selected else BORDER,
                              (40, card_y, SCREEN_W-80, 100), 2, border_radius=10)
 
-            vid = r.get("videoId","")
+            vid = r.get("videoId", "")
             art = self.album_arts.get(vid)
             if art:
                 self.screen.blit(art, (60, card_y + 5))
             else:
-                pygame.draw.rect(self.screen, AMBER_FAINT,
-                                 (60, card_y+5, 90, 90), border_radius=6)
-                draw_text_centered(self.screen, "♪", self.font_lg,
-                                   AMBER_DIM, 105, card_y + 50)
+                pygame.draw.rect(self.screen, AMBER_FAINT, (60, card_y+5, 90, 90), border_radius=6)
+                draw_text_centered(self.screen, "♪", self.font_lg, AMBER_DIM, 105, card_y + 50)
 
             tx = 170
-            title   = r.get("title","")[:48]
-            artists = r.get("artists",[])
-            # fix: artists 없는 경우 author / channelId fallback
-            artist  = (artists[0]["name"] if artists
-                       else r.get("author") or r.get("channelId", "Unknown"))
-            album   = r.get("album",{}).get("name","") if isinstance(r.get("album"),dict) else ""
-            # fix: duration_seconds(정수) → '분:초' 변환
+            title    = r.get("title", "")[:48]
+            artist   = extract_artist(r)   # fix: 전용 함수로 아티스트 추출
+            album    = r.get("album", {}).get("name", "") if isinstance(r.get("album"), dict) else ""
+            # fix: duration 없으면 duration_seconds(정수) fallback
             duration = fmt_duration(r.get("duration") or r.get("duration_seconds"))
 
             self.screen.blit(self.font_lg.render(title, True, WHITE if selected else TEXT),
@@ -745,8 +689,7 @@ class KioskApp:
             self.screen.blit(self.font_sm.render(artist, True, AMBER if selected else TEXT_MUTED),
                              (tx, card_y + 46))
             if album:
-                self.screen.blit(self.font_xs.render(album, True, TEXT_FAINT),
-                                 (tx, card_y + 70))
+                self.screen.blit(self.font_xs.render(album, True, TEXT_FAINT), (tx, card_y + 70))
             if duration:
                 d_surf = self.font_sm.render(duration, True, TEXT_MUTED)
                 self.screen.blit(d_surf, (SCREEN_W - 140, card_y + 40))
@@ -765,11 +708,9 @@ class KioskApp:
             rad = math.radians(angle)
             x1 = int(cx + 50 * math.cos(rad))
             y1 = int(cy - 120 + 50 * math.sin(rad))
-            pygame.gfxdraw.filled_circle(self.screen, x1, y1, 4,
-                                         (*AMBER, int(255 * i / 12)))
+            pygame.gfxdraw.filled_circle(self.screen, x1, y1, 4, (*AMBER, int(255 * i / 12)))
 
         draw_text_centered(self.screen, self.loading_msg, self.font_md, TEXT, cx, cy - 30)
-
         bar_w = 500
         bx, by = cx - bar_w//2, cy + 10
         pygame.draw.rect(self.screen, SURF2, (bx, by, bar_w, 10), border_radius=5)
@@ -815,7 +756,7 @@ class KioskApp:
             pygame.draw.rect(self.screen, AMBER, (tx, prog_y, fill, 8), border_radius=4)
 
         def fmt(ms):
-            s = ms//1000; return f"{s//60:02d}:{s%60:02d}"
+            s = ms // 1000; return f"{s//60:02d}:{s%60:02d}"
         self.screen.blit(self.font_xs.render(fmt(elapsed_ms), True, TEXT_MUTED), (tx, prog_y+12))
         tr = self.font_xs.render(fmt(total_ms), True, TEXT_MUTED)
         self.screen.blit(tr, (tx + prog_w - tr.get_width(), prog_y+12))
