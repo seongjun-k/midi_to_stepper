@@ -170,6 +170,18 @@ def freq_to_name(f: int) -> str:
     best = min(names.items(), key=lambda kv: abs(kv[0]-f))
     return best[1]
 
+def fmt_duration(raw) -> str:
+    """duration 필드를 '분:초' 문자열로 변환.
+    - 이미 '3:36' 형태 문자열 → 그대로 반환
+    - 정수(초) → 변환
+    - None / 빈값 → '' 반환
+    """
+    if not raw:
+        return ""
+    if isinstance(raw, int):
+        return f"{raw // 60}:{raw % 60:02d}"
+    return str(raw)
+
 def draw_rounded_rect(surf, color, rect, radius, alpha=255):
     x, y, w, h = rect
     if alpha < 255:
@@ -354,6 +366,7 @@ class KioskApp:
 
         self.state = self.STATE_SEARCH
         self.query = ""
+        self.composing = ""      # fix: 한글 IME 조합 중 문자 (TEXTEDITING)
         self.cursor_blink = 0
         self.search_results = []
         self.selected_idx = 0
@@ -418,8 +431,13 @@ class KioskApp:
             if ev.type == pygame.QUIT:
                 self._cleanup(); sys.exit()
 
-            # 한글 IME: TEXTINPUT으로만 처리 (KEYDOWN fallback 제거 → 영문 중복 입력 방지)
+            # fix: TEXTEDITING → IME 조합 중 문자 추적 (한글 띄어쓰기 미리보기)
+            if ev.type == pygame.TEXTEDITING:
+                self.composing = ev.text
+
+            # fix: TEXTINPUT → 확정된 문자 (한글/영문 모두 여기서 처리)
             if ev.type == pygame.TEXTINPUT:
+                self.composing = ""
                 if self.state == self.STATE_SEARCH and len(self.query) < 40:
                     self.query += ev.text
 
@@ -438,9 +456,11 @@ class KioskApp:
                         self._do_search()
                     elif ev.key == pygame.K_BACKSPACE:
                         self.query = self.query[:-1]
-                    # TEXTINPUT이 발생하지 않는 환경 fallback (영문/숫자만, 한글 제외)
+                    # fix: TEXTINPUT이 발생하지 않는 환경 fallback
+                    # 한글(\uAC00~\uD7A3) 및 이미 TEXTINPUT으로 처리된 ASCII(\x00~\x7A) 제외
                     elif ev.unicode and ev.unicode.isprintable() and len(self.query) < 40:
-                        if not ('\uAC00' <= ev.unicode <= '\uD7A3'):
+                        if not ('\uAC00' <= ev.unicode <= '\uD7A3') \
+                           and not ('\x00'  <= ev.unicode <= '\x7A'):
                             self.query += ev.unicode
 
                 elif self.state == self.STATE_RESULTS:
@@ -669,10 +689,11 @@ class KioskApp:
         pygame.draw.rect(self.screen, SURF2, box, border_radius=12)
         pygame.draw.rect(self.screen, AMBER if self.cursor_blink < 30 else BORDER, box, 2, border_radius=12)
 
-        display_text = self.query + ("|" if self.cursor_blink < 30 else " ")
+        # fix: 조합 중인 문자(self.composing)를 커서 앞에 미리보기로 표시
+        display_text = self.query + self.composing + ("|" if self.cursor_blink < 30 else " ")
         t_surf = self.font_lg.render(display_text, True, WHITE)
         self.screen.blit(t_surf, (box.x + 20, box.y + 16))
-        if not self.query:
+        if not self.query and not self.composing:
             hint = self.font_md.render("예: 아이유 밤편지  /  BTS Dynamite ...", True, TEXT_FAINT)
             self.screen.blit(hint, (box.x + 20, box.y + 20))
 
@@ -710,13 +731,14 @@ class KioskApp:
                                    AMBER_DIM, 105, card_y + 50)
 
             tx = 170
-            title    = r.get("title","")[:48]
-            artists  = r.get("artists",[])
+            title   = r.get("title","")[:48]
+            artists = r.get("artists",[])
             # fix: artists 없는 경우 author / channelId fallback
-            artist   = (artists[0]["name"] if artists
-                        else r.get("author") or r.get("channelId", "Unknown"))
-            album    = r.get("album",{}).get("name","") if isinstance(r.get("album"),dict) else ""
-            duration = r.get("duration","")
+            artist  = (artists[0]["name"] if artists
+                       else r.get("author") or r.get("channelId", "Unknown"))
+            album   = r.get("album",{}).get("name","") if isinstance(r.get("album"),dict) else ""
+            # fix: duration_seconds(정수) → '분:초' 변환
+            duration = fmt_duration(r.get("duration") or r.get("duration_seconds"))
 
             self.screen.blit(self.font_lg.render(title, True, WHITE if selected else TEXT),
                              (tx, card_y + 12))
