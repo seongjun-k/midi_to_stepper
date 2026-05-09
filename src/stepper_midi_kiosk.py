@@ -366,28 +366,49 @@ class KioskApp:
         self.loading_progress = 0.0
 
     def _init_fonts(self):
+        # fix: 상대경로 → 절대경로로 수정 (Windows/Linux/Mac 모두 지원)
+        windir = os.environ.get("WINDIR", "C:\\Windows")
         korean_fonts = [
-            "malgunbd.ttf", "malgun.ttf",
-            "NanumGothic.ttf", "NanumGothicBold.ttf",
-            "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
-            "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+            os.path.join(windir, "Fonts", "malgunbd.ttf"),   # 맑은 고딕 Bold (Windows)
+            os.path.join(windir, "Fonts", "malgun.ttf"),     # 맑은 고딕 (Windows)
+            os.path.join(windir, "Fonts", "gulim.ttc"),      # 굴림 (Windows)
+            os.path.join(windir, "Fonts", "batang.ttc"),     # 바탕 (Windows)
+            "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",  # Linux
+            "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",      # Linux
+            "/System/Library/Fonts/AppleSDGothicNeo.ttc",           # macOS
         ]
         kf = None
         for fp in korean_fonts:
             if os.path.exists(fp):
-                kf = fp; break
+                kf = fp
+                break
+
+        # pygame SysFont fallback
+        if kf is None:
+            for name in ["malgun gothic", "nanum gothic", "gulim", "batang"]:
+                f = pygame.font.match_font(name)
+                if f:
+                    kf = f
+                    break
+
         if kf:
-            self.font_lg   = pygame.font.Font(kf, 26)
-            self.font_md   = pygame.font.Font(kf, 18)
-            self.font_sm   = pygame.font.Font(kf, 14)
-            self.font_xs   = pygame.font.Font(kf, 11)
-            self.font_hero = pygame.font.Font(kf, 42)
-        else:
-            self.font_lg   = pygame.font.SysFont("arial", 26, bold=True)
-            self.font_md   = pygame.font.SysFont("arial", 18)
-            self.font_sm   = pygame.font.SysFont("arial", 14)
-            self.font_xs   = pygame.font.SysFont("arial", 11)
-            self.font_hero = pygame.font.SysFont("arial", 42, bold=True)
+            try:
+                self.font_lg   = pygame.font.Font(kf, 26)
+                self.font_md   = pygame.font.Font(kf, 18)
+                self.font_sm   = pygame.font.Font(kf, 14)
+                self.font_xs   = pygame.font.Font(kf, 11)
+                self.font_hero = pygame.font.Font(kf, 42)
+                print(f"[폰트] 한글 폰트 로드: {kf}")
+                return
+            except Exception as e:
+                print(f"[폰트 오류] {e}")
+
+        print("[폰트 경고] 한글 폰트를 찾지 못했습니다.")
+        self.font_lg   = pygame.font.SysFont("arial", 26, bold=True)
+        self.font_md   = pygame.font.SysFont("arial", 18)
+        self.font_sm   = pygame.font.SysFont("arial", 14)
+        self.font_xs   = pygame.font.SysFont("arial", 11)
+        self.font_hero = pygame.font.SysFont("arial", 42, bold=True)
 
     # ── 이벤트 ────────────────────────────────────────────────────────────────
     def handle_events(self):
