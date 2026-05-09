@@ -347,7 +347,7 @@ class KioskApp:
         self.clock = pygame.time.Clock()
 
         if not DEMO_MODE:
-            self.yt = YTMusic()
+            self.yt = YTMusic()  # 인증 파일 없이 공개 카탈로그 검색
         self.ser = open_serial()
 
         self.state = self.STATE_SEARCH
@@ -415,6 +415,15 @@ class KioskApp:
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
                 self._cleanup(); sys.exit()
+
+            # ── 한글 IME 조합 완료 문자 입력 (TEXTINPUT) ──────────────────────
+            # KEYDOWN의 ev.unicode는 한글 조합 중간 상태를 잘못 처리할 수 있음.
+            # pygame.TEXTINPUT은 IME가 조합을 완료한 최종 문자를 전달하므로
+            # 한글/일본어/중국어 등 IME 입력에 반드시 필요함.
+            if ev.type == pygame.TEXTINPUT:
+                if self.state == self.STATE_SEARCH and len(self.query) < 40:
+                    self.query += ev.text
+
             if ev.type == pygame.KEYDOWN:
                 if ev.key == pygame.K_ESCAPE:
                     if self.state == self.STATE_PLAYING:
@@ -430,8 +439,12 @@ class KioskApp:
                         self._do_search()
                     elif ev.key == pygame.K_BACKSPACE:
                         self.query = self.query[:-1]
-                    elif ev.unicode and len(self.query) < 40:
-                        self.query += ev.unicode
+                    # 영문/숫자/특수문자는 TEXTINPUT이 처리하지만,
+                    # pygame.TEXTINPUT이 발생하지 않는 환경을 위한 fallback
+                    elif ev.unicode and ev.unicode.isprintable() and len(self.query) < 40:
+                        # TEXTINPUT과 중복 입력 방지: 한글(Unicode 범위 AC00-D7A3)은 건너뜀
+                        if not ('\uAC00' <= ev.unicode <= '\uD7A3'):
+                            self.query += ev.unicode
 
                 elif self.state == self.STATE_RESULTS:
                     if ev.key == pygame.K_UP:
