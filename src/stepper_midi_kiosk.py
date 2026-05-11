@@ -69,6 +69,14 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 # YouTube URL에서 videoId(11자) 추출
 URL_PATTERN = re.compile(r"(?:v=|youtu\.be/|music\.youtube\.com/watch\?v=)([A-Za-z0-9_-]{11})")
 
+# 커버/라이브/리믹스 판별 키워드 (소문자)
+NON_ORIGINAL_KEYWORDS = [
+    "cover", "커버", "live", "라이브", "remix", "리믹스",
+    "karaoke", "노래방", "instrumental", "mr", "반주",
+    "acoustic", "acoustic ver", "piano ver", "version",
+    "tribute", "parody", "패러디", "nightcore",
+]
+
 # ── 색상 팔레트 ───────────────────────────────────────────────────────────────
 BG          = (8,  8,  7)
 SURF        = (14, 13, 11)
@@ -174,6 +182,27 @@ def extract_artist(r: dict) -> str:
         if val:
             return str(val)
     return ""
+
+def is_non_original(title: str) -> bool:
+    """제목에 커버/라이브/리믹스 키워드가 포함되면 True 반환."""
+    lower = title.lower()
+    return any(kw in lower for kw in NON_ORIGINAL_KEYWORDS)
+
+def original_score(r: dict) -> int:
+    """
+    오리지널 곡 우선 정렬 점수 (낮을수록 상단).
+    - resultType == 'song' → 0점 보너스
+    - 제목에 non-original 키워드 → +10점 페널티
+    - album 정보 있음 → -1점 보너스 (정식 발매 가능성)
+    """
+    score = 0
+    if r.get("resultType") != "song":
+        score += 5
+    if is_non_original(r.get("title", "")):
+        score += 10
+    if r.get("album") and isinstance(r.get("album"), dict) and r["album"].get("name"):
+        score -= 1
+    return score
 
 def draw_rounded_rect(surf, color, rect, radius, alpha=255):
     x, y, w, h = rect
@@ -495,7 +524,7 @@ class KioskApp:
                     for r in self.search_results:
                         self.album_arts[r["videoId"]] = make_demo_album_art((90, 90))
                 else:
-                    # URL 직접 입력 처리: videoId 추출 후 검색 생략
+                    # URL 직접 입력 처리
                     vid = extract_video_id(self.query)
                     if vid:
                         self.loading_msg = "URL에서 곡 정보 가져오는 중..."
@@ -510,35 +539,33 @@ class KioskApp:
                         self.selected_idx = 0
                         return
 
-                    # 1단계: filter="songs" + " official" 키워드로 오리지널 우선 검색
-                    search_query = self.query + " official"
+                    # 1단계: filter="songs" 로 오리지널 우선 검색
                     try:
-                        raw = self.yt.search(search_query, filter="songs", limit=15)
-                        results = [r for r in raw if r.get("videoId")][:5]
+                        raw = self.yt.search(self.query, filter="songs", limit=20)
+                        candidates = [r for r in raw if r.get("videoId")]
                     except Exception:
                         raw = []
-                        results = []
+                        candidates = []
 
                     # 2단계: filter 없이 전체 검색 fallback
-                    if not results:
-                        raw = self.yt.search(self.query, limit=15)
-                        results = [r for r in raw
-                                   if r.get("resultType") == "song"
-                                   and r.get("videoId")][:5]
+                    if not candidates:
+                        raw = self.yt.search(self.query, limit=20)
+                        candidates = [r for r in raw
+                                      if r.get("resultType") in ("song", "video")
+                                      and r.get("videoId")]
 
-                    # 3단계: song/video 모두 허용 fallback
-                    if not results:
-                        results = [r for r in raw
-                                   if r.get("resultType") in ("song", "video")
-                                   and r.get("videoId")][:5]
+                    # 3단계: videoId만 있으면 다 허용 fallback
+                    if not candidates:
+                        candidates = [r for r in raw if r.get("videoId")]
 
-                    # 4단계: videoId만 있으면 다 허용
-                    if not results:
-                        results = [r for r in raw if r.get("videoId")][:5]
+                    if not candidates:
+                        raise ValueError(f"'{self.query}'에 대한 재생 가능한 결과가 없습니다")
+
+                    # 오리지널 곡 우선 정렬: 커버/라이브/리믹스를 하단으로
+                    candidates.sort(key=lambda r: original_score(r))
+                    results = candidates[:5]
 
                     self.search_results = results
-                    if not self.search_results:
-                        raise ValueError(f"'{self.query}'에 대한 재생 가능한 결과가 없습니다")
                     for r in self.search_results:
                         vid = r.get("videoId", "")
                         thumbs = r.get("thumbnails", [])
@@ -560,7 +587,7 @@ class KioskApp:
         self.loading_progress = 0.0
         video_id = result.get("videoId", "")
         title    = result.get("title", "Unknown")
-        artist   = extract_artist(result)  # fix: 아티스트 추출 전용 함수 사용
+        artist   = extract_artist(result)
         art_surf = self.album_arts.get(video_id)
 
         def _convert():
@@ -729,9 +756,8 @@ class KioskApp:
 
             tx = 170
             title    = r.get("title", "")[:48]
-            artist   = extract_artist(r)   # fix: 전용 함수로 아티스트 추출
+            artist   = extract_artist(r)
             album    = r.get("album", {}).get("name", "") if isinstance(r.get("album"), dict) else ""
-            # fix: duration 없으면 duration_seconds(정수) fallback
             duration = fmt_duration(r.get("duration") or r.get("duration_seconds"))
 
             self.screen.blit(self.font_lg.render(title, True, WHITE if selected else TEXT),
