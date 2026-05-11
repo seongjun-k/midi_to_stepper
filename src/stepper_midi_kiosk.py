@@ -342,7 +342,14 @@ class KioskApp:
         self.clock = pygame.time.Clock()
 
         if not DEMO_MODE:
-            self.yt = YTMusic()
+            # browser.json이 있으면 인증 모드로 실행 (검색 품질 향상)
+            auth_file = os.path.join(os.path.dirname(__file__), "browser.json")
+            if os.path.exists(auth_file):
+                self.yt = YTMusic(auth_file)
+                print(f"[YTMusic] 인증 모드로 실행 ({auth_file})")
+            else:
+                self.yt = YTMusic()
+                print("[YTMusic] 비인증 모드로 실행 (browser.json 없음)")
         self.ser = open_serial()
 
         self.state = self.STATE_SEARCH
@@ -503,17 +510,32 @@ class KioskApp:
                         self.selected_idx = 0
                         return
 
-                    # 일반 텍스트 검색: resultType=song 우선, 없으면 전체 fallback
-                    raw = self.yt.search(self.query, limit=15)
-                    results = [r for r in raw
-                               if r.get("resultType") == "song"
-                               and r.get("videoId")][:5]
+                    # 1단계: filter="songs" + " official" 키워드로 오리지널 우선 검색
+                    search_query = self.query + " official"
+                    try:
+                        raw = self.yt.search(search_query, filter="songs", limit=15)
+                        results = [r for r in raw if r.get("videoId")][:5]
+                    except Exception:
+                        raw = []
+                        results = []
+
+                    # 2단계: filter 없이 전체 검색 fallback
+                    if not results:
+                        raw = self.yt.search(self.query, limit=15)
+                        results = [r for r in raw
+                                   if r.get("resultType") == "song"
+                                   and r.get("videoId")][:5]
+
+                    # 3단계: song/video 모두 허용 fallback
                     if not results:
                         results = [r for r in raw
                                    if r.get("resultType") in ("song", "video")
                                    and r.get("videoId")][:5]
+
+                    # 4단계: videoId만 있으면 다 허용
                     if not results:
                         results = [r for r in raw if r.get("videoId")][:5]
+
                     self.search_results = results
                     if not self.search_results:
                         raise ValueError(f"'{self.query}'에 대한 재생 가능한 결과가 없습니다")
