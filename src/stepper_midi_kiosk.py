@@ -9,7 +9,7 @@ STEPPER MIDI KIOSK
   python stepper_midi_kiosk.py --demo   # 데모 모드 (아두이노 없이 UI만 테스트)
 """
 
-import sys, os, io, time, threading, math, urllib.request, tempfile, random
+import sys, os, io, time, threading, math, urllib.request, tempfile, random, re
 from collections import deque
 import pygame
 import pygame.gfxdraw
@@ -65,6 +65,9 @@ SCREEN_H     = 720
 OSC_BUF_LEN  = 120
 CACHE_DIR    = os.path.join(tempfile.gettempdir(), "stepper_midi_cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
+
+# YouTube URL에서 videoId(11자) 추출
+URL_PATTERN = re.compile(r"(?:v=|youtu\.be/|music\.youtube\.com/watch\?v=)([A-Za-z0-9_-]{11})")
 
 # ── 색상 팔레트 ───────────────────────────────────────────────────────────────
 BG          = (8,  8,  7)
@@ -126,6 +129,11 @@ def make_demo_song(length_ms=30000):
     return song, durs
 
 # ── 유틸 ──────────────────────────────────────────────────────────────────────
+def extract_video_id(query: str) -> str | None:
+    """YouTube/YouTube Music URL에서 videoId 추출. 없으면 None 반환."""
+    m = URL_PATTERN.search(query)
+    return m.group(1) if m else None
+
 def note_to_freq(note: int) -> int:
     if note <= 0: return 0
     return round(440.0 * (2.0 ** ((note - 69) / 12.0)))
@@ -401,7 +409,7 @@ class KioskApp:
 
             if ev.type == pygame.TEXTINPUT:
                 self.composing = ""
-                if self.state == self.STATE_SEARCH and len(self.query) < 40:
+                if self.state == self.STATE_SEARCH and len(self.query) < 80:
                     self.query += ev.text
 
             if ev.type == pygame.KEYDOWN:
@@ -419,7 +427,7 @@ class KioskApp:
                         self._do_search()
                     elif ev.key == pygame.K_BACKSPACE:
                         self.query = self.query[:-1]
-                    elif ev.unicode and ev.unicode.isprintable() and len(self.query) < 40:
+                    elif ev.unicode and ev.unicode.isprintable() and len(self.query) < 80:
                         if not ('\uAC00' <= ev.unicode <= '\uD7A3') \
                            and not ('\x00'  <= ev.unicode <= '\x7A'):
                             self.query += ev.unicode
@@ -480,10 +488,30 @@ class KioskApp:
                     for r in self.search_results:
                         self.album_arts[r["videoId"]] = make_demo_album_art((90, 90))
                 else:
+                    # URL 직접 입력 처리: videoId 추출 후 검색 생략
+                    vid = extract_video_id(self.query)
+                    if vid:
+                        self.loading_msg = "URL에서 곡 정보 가져오는 중..."
+                        self.search_results = [{
+                            "videoId": vid,
+                            "title": self.query,
+                            "artists": [],
+                            "thumbnails": [],
+                        }]
+                        self.loading_progress = 1.0
+                        self.state = self.STATE_RESULTS
+                        self.selected_idx = 0
+                        return
+
+                    # 일반 텍스트 검색: resultType=song 우선, 없으면 전체 fallback
                     raw = self.yt.search(self.query, limit=15)
                     results = [r for r in raw
-                               if r.get("resultType") in ("song", "video")
+                               if r.get("resultType") == "song"
                                and r.get("videoId")][:5]
+                    if not results:
+                        results = [r for r in raw
+                                   if r.get("resultType") in ("song", "video")
+                                   and r.get("videoId")][:5]
                     if not results:
                         results = [r for r in raw if r.get("videoId")][:5]
                     self.search_results = results
@@ -633,7 +661,7 @@ class KioskApp:
     def _draw_search(self):
         draw_text_centered(self.screen, "STEPPER MIDI KIOSK",
                            self.font_hero, AMBER, SCREEN_W//2, 140)
-        subtitle = "노래를 검색하면 스텝모터로 연주합니다" + (" — 데모 모드" if DEMO_MODE else "")
+        subtitle = "노래를 검색하거나 YouTube URL을 붙여넣으세요" + (" — 데모 모드" if DEMO_MODE else "")
         draw_text_centered(self.screen, subtitle, self.font_md, TEXT_MUTED, SCREEN_W//2, 195)
 
         box = pygame.Rect(SCREEN_W//2 - 340, 270, 680, 64)
@@ -641,10 +669,10 @@ class KioskApp:
         pygame.draw.rect(self.screen, AMBER if self.cursor_blink < 30 else BORDER, box, 2, border_radius=12)
 
         display_text = self.query + self.composing + ("|" if self.cursor_blink < 30 else " ")
-        t_surf = self.font_lg.render(display_text, True, WHITE)
+        t_surf = self.font_lg.render(display_text[:48], True, WHITE)
         self.screen.blit(t_surf, (box.x + 20, box.y + 16))
         if not self.query and not self.composing:
-            hint = self.font_md.render("예: 아이유 밤편지  /  BTS Dynamite ...", True, TEXT_FAINT)
+            hint = self.font_md.render("예: 아이유 밤편지  /  https://music.youtube.com/watch?v=...", True, TEXT_FAINT)
             self.screen.blit(hint, (box.x + 20, box.y + 20))
 
         btn = pygame.Rect(SCREEN_W//2 - 110, 360, 220, 52)
