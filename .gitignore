@@ -11,3 +11,5 @@ __pycache__/
 Thumbs.db
 
 midi/
+config.json
+cache/

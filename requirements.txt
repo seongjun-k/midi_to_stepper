@@ -1,0 +1,20 @@
+# Python 3.11 전용 (basic-pitch가 3.12 미지원 — docs/PLAN.md §6)
+setuptools<81        # resampy(basic-pitch 의존)가 pkg_resources 요구
+fastapi
+uvicorn
+websockets
+mido
+pyserial
+ytmusicapi
+yt-dlp
+basic-pitch
+
+# --- GPU 가속 (선택, NVIDIA 드라이버 필요) ---
+# tensorflow[and-cuda]==2.15.0은 pip에서 사라진 tensorrt 8.6을 고정해 설치 불가 →
+# 필요한 CUDA 12.2 라이브러리만 직접 설치 (추론 2.7s→1.6s 실측):
+# pip install nvidia-cudnn-cu12==8.9.4.25 nvidia-cublas-cu12==12.2.5.6 \
+#   nvidia-cuda-runtime-cu12==12.2.140 nvidia-cuda-nvrtc-cu12==12.2.140 \
+#   nvidia-cufft-cu12==11.0.8.103 nvidia-curand-cu12==10.3.3.141 \
+#   nvidia-cusolver-cu12==11.5.2.141 nvidia-cusparse-cu12==12.1.2.141 \
+#   nvidia-cuda-cupti-cu12==12.2.142 nvidia-nccl-cu12==2.16.5 \
+#   nvidia-cuda-nvcc-cu12==12.2.140
