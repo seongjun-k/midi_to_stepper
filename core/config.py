@@ -6,12 +6,12 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH = os.path.join(PROJECT_ROOT, "config.json")
 
 DEFAULT_CONFIG = {
-    "num_motors": 6,
+    "num_motors": 5,             # Robin Nano 드라이버 슬롯 X/Y/Z/E0/E1 기준. ESP32(최대 8)면 늘려도 된다
     "serial_port": "",          # 빈 문자열 = 자동 탐지
     "baud": 115200,
     "fqbn": "esp32:esp32:esp32s3",
     "bands": None,               # null = auto_bands()로 자동 산출
-    "motor_names": ["고음1", "고음2", "중고음", "중저음", "저음1", "저음2"],
+    "motor_names": ["고음", "중고음", "중음", "중저음", "저음"],
     "cache_dir": "cache",        # 상대경로면 PROJECT_ROOT 기준
 }
 
@@ -40,6 +40,7 @@ def resolve_cache_dir(cfg):
 
 if __name__ == "__main__":
     c = load()
-    assert c["num_motors"] == 6 and c["baud"] == 115200
+    assert len(c["motor_names"]) == c["num_motors"], "motor_names 개수가 num_motors와 다르다"
+    assert c["baud"] == 115200
     assert os.path.exists(CONFIG_PATH)
     print("config self-check ok:", c)

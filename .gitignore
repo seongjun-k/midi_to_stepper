@@ -16,3 +16,4 @@ cache/
 browser.json
 CLAUDE.md
 .claude/
+.pio/
