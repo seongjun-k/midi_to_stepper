@@ -14,3 +14,5 @@ midi/
 config.json
 cache/
 browser.json
+CLAUDE.md
+.claude/
