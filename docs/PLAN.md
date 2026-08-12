@@ -3,6 +3,8 @@
 작성: 2026-07-19 · 브랜치: `web-ui`
 
 > **진행 현황 (2026-07-20)**: 1~6단계 완료. 파싱 12.9배 개선(499→39ms, 결과 동일성 검증), 데모 모드 REST·WS·브라우저 렌더링 확인, ESP32-S3 컴파일 통과. 미완: 실기 하드웨어 테스트(보드 확정 대기), 유튜브 변환 경로 종단 테스트(네트워크 필요), 커밋.
+>
+> **진행 현황 (2026-08-12)**: 기본 대상 보드 = **MKS Robin Nano v1.2**(STM32F103, 5모터). STM32F103은 축별 HW PWM 불가라 §4의 LEDC 대신 **DDS ISR**로 재작성(`firmware/robin_nano_dds/`) — 컴파일 통과, **실기 검증 0**. ESP32 펌웨어(`stepper_ledc/`)는 유지. §4는 ESP32 LEDC 원안 기록으로 남겨둔다.
 
 ## 확정된 결정
 
@@ -11,8 +13,8 @@
 | 전환 대상 | `midi_player.py` + `stepper_midi_kiosk.py` 두 GUI를 웹 앱 하나로 통합, 기존 GUI는 `legacy/`로 이동 |
 | 접속 형태 | LAN 접속 (우분투 PC에서 서버 실행, 태블릿·폰·노트북 브라우저에서 사용 — 박람회 태블릿 키오스크 겸용) |
 | 프론트 스택 | 순수 HTML/JS 단일 파일 (`static/index.html`), 빌드 도구 없음 |
-| 모터 개수 | config로 가변 (기본 6) |
-| MCU | Mega 폐기 → ESP32-S3 등으로 교체 예정 (보드 미확정, 펌웨어를 보드 독립적으로 재작성) |
+| 모터 개수 | config로 가변 (기본 5) |
+| MCU | Mega 폐기. 기본 대상 = **MKS Robin Nano v1.2**(STM32F103, `firmware/robin_nano_dds/`). ESP32(`stepper_ledc/`)도 유지. 시리얼 프로토콜은 보드 독립 |
 | 개발 OS | Windows → Ubuntu |
 
 ## 목표
@@ -35,7 +37,8 @@ midi_to_stepper/
 │   └── youtube.py         # 검색/yt-dlp/basic-pitch/캐시/원곡 우선 정렬 (키오스크에서 이식)
 ├── static/index.html      # 프론트 전체 (HTML+CSS+JS 인라인)
 ├── firmware/
-│   └── stepper_ledc/stepper_ledc.ino   # ESP32용 신규 펌웨어
+│   ├── stepper_ledc/stepper_ledc.ino   # ESP32용 (LEDC 하드웨어 PWM)
+│   └── robin_nano_dds/                 # MKS Robin Nano v1.2 (STM32F103, DDS ISR) — 기본 대상
 ├── legacy/                # 기존 midi_player.py, stepper_midi_kiosk.py
 └── docs/PLAN.md           # 이 문서
 ```
@@ -81,6 +84,8 @@ midi_to_stepper/
 구현 후 데모 모드로 먼저 시연 → 피드백 반영.
 
 ## 4. 펌웨어: Mega → ESP32
+
+> 아래는 ESP32 LEDC **원안 기록**이다. 현재 기본 대상은 MKS Robin Nano(STM32F103)이며, 이 보드는 STEP 핀에 축별 HW PWM이 안 나와 LEDC 대신 DDS ISR로 구현했다(`firmware/robin_nano_dds/`). ESP32로 확정되면 아래 원안이 유효.
 
 - **LEDC 하드웨어 PWM**: 채널당 주파수 설정만 하면 펄스를 하드웨어가 생성. `micros()` 폴링 제거 → 지터 제로, 음 변경은 `ledcChangeFrequency()` 한 줄, loop에는 시리얼 수신만 남음
 - ESP32-S3 기준 LEDC 8채널 → 최대 8모터 (config 가변과 맞물림)

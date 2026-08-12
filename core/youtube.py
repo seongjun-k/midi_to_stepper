@@ -4,7 +4,10 @@ basic-pitch는 함수 내부에서만 지연 import한다 — 설치가 안 되�
 서버 자체(검색/재생 등 나머지 기능)는 정상 기동해야 하기 때문이다.
 """
 import glob
+import json
 import os
+import urllib.parse
+import urllib.request
 
 from ytmusicapi import YTMusic
 
@@ -124,6 +127,66 @@ def _find_cached_audio(cache_dir, video_id):
     return next((h for h in hits if not h.endswith(".mid")), None)
 
 
+# ── 주크박스 라이브러리 ────────────────────────────────────────────────
+# 캐시 루트의 {vid}.* 는 _find_cached_audio가 오디오로 잡으므로, 메타(json)·
+# 썸네일은 반드시 하위폴더 library/ 에 분리해 오인식을 막는다.
+def _lib_dir(cache_dir):
+    return os.path.join(cache_dir, "library")
+
+
+def _find_thumb(cache_dir, video_id):
+    hits = glob.glob(os.path.join(_lib_dir(cache_dir), f"{video_id}.*"))
+    return next((h for h in hits if not h.endswith(".json")), None)
+
+
+def save_library_entry(cache_dir, video_id, title, artist, thumbnail_url=""):
+    """변환 완료된 곡의 메타(제목/아티스트/썸네일 URL)를 library/{vid}.json에 저장하고,
+    썸네일 이미지를 library/ 에 로컬 캐시한다(오프라인 대비). 썸네일 실패는 치명적 아님."""
+    d = _lib_dir(cache_dir)
+    os.makedirs(d, exist_ok=True)
+    meta = {"videoId": video_id, "title": title, "artist": artist, "thumbnail": thumbnail_url}
+    with open(os.path.join(d, f"{video_id}.json"), "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False)
+    if thumbnail_url and not _find_thumb(cache_dir, video_id):
+        try:
+            ext = os.path.splitext(urllib.parse.urlparse(thumbnail_url).path)[1] or ".jpg"
+            req = urllib.request.Request(thumbnail_url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                data = resp.read()
+            with open(os.path.join(d, f"{video_id}{ext}"), "wb") as f:
+                f.write(data)
+        except Exception:
+            pass  # 원격 URL로 폴백 (frontend onerror)
+    return meta
+
+
+def list_library(cache_dir):
+    """재생 가능한(=.mid 존재) 저장곡 목록. 최근 추가순."""
+    out = []
+    for meta_path in glob.glob(os.path.join(_lib_dir(cache_dir), "*.json")):
+        try:
+            with open(meta_path, encoding="utf-8") as f:
+                m = json.load(f)
+        except Exception:
+            continue
+        vid = m.get("videoId") or os.path.splitext(os.path.basename(meta_path))[0]
+        mid = os.path.join(cache_dir, f"{vid}.mid")
+        if not os.path.exists(mid):
+            continue
+        out.append({
+            "videoId": vid,
+            "title": m.get("title", ""),
+            "artist": m.get("artist", ""),
+            "thumbnail": m.get("thumbnail", ""),
+            "hasThumb": _find_thumb(cache_dir, vid) is not None,
+            "_mtime": os.path.getmtime(mid),
+        })
+    out.sort(key=lambda x: x["_mtime"], reverse=True)
+    for x in out:
+        del x["_mtime"]
+    return out
+
+
 def download_and_convert(video_id, cache_dir, on_progress=None):
     """오디오 다운로드(yt-dlp) → MIDI 변환(basic-pitch). 둘 다 cache_dir에 캐시.
     on_progress(ratio: float, msg: str) 콜백으로 진행률 통지.
@@ -190,4 +253,15 @@ if __name__ == "__main__":
     assert original_score({"resultType": "song", "title": "x", "album": {"name": "a"}}) == -1
     assert fmt_duration(185) == "3:05"
     assert extract_artist({"artists": [{"name": "IU"}]}) == "IU"
+
+    # 라이브러리 저장/조회 라운드트립 (네트워크 없이 — thumbnail_url="" 로 다운로드 스킵)
+    import tempfile
+    tmp = tempfile.mkdtemp()
+    open(os.path.join(tmp, "abc.mid"), "w").close()  # 재생 가능 표식
+    save_library_entry(tmp, "abc", "Song", "Artist", "")
+    open(os.path.join(tmp, "noconv.json"), "w").close()  # noise
+    lib = list_library(tmp)
+    assert len(lib) == 1 and lib[0]["videoId"] == "abc" and lib[0]["title"] == "Song"
+    save_library_entry(tmp, "zzz", "NoMidi", "X", "")  # .mid 없으면 목록 제외
+    assert len(list_library(tmp)) == 1
     print("youtube self-check ok")

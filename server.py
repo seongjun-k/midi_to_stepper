@@ -23,7 +23,7 @@ import time
 import serial.tools.list_ports
 import uvicorn
 from fastapi import Body, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 from core import config as cfg_mod
 from core import midi as midi_mod
@@ -121,12 +121,17 @@ async def on_startup():
     threading.Thread(target=yt_mod.preload_model, daemon=True).start()
 
 
+# 단일 HTML 앱이라 브라우저(특히 모바일)가 index.html을 캐시하면 갱신이 안 된다.
+# no-store로 매 요청 새로 받게 한다. (정적 자산 분리 전까지 이 방식으로 충분)
+_NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"}
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index():
     path = os.path.join(STATIC_DIR, "index.html")
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
-            return f.read()
+            return HTMLResponse(content=f.read(), headers=_NO_CACHE)
     return "<h1>midi_to_stepper</h1><p>static/index.html 준비 중 (프론트 작업 대기)</p>"
 
 
@@ -210,11 +215,28 @@ async def api_search(q: str):
         raise HTTPException(400, str(e))
 
 
+@app.get("/api/library")
+async def api_library():
+    return yt_mod.list_library(_resolve_cache_dir())
+
+
+@app.get("/api/thumb/{video_id}")
+async def api_thumb(video_id: str):
+    # 경로 traversal 차단: video_id는 영숫자/_/- 만 허용
+    if not video_id or not video_id.replace("_", "").replace("-", "").isalnum():
+        raise HTTPException(404, "not found")
+    path = yt_mod._find_thumb(_resolve_cache_dir(), video_id)
+    if not path:
+        raise HTTPException(404, "no thumbnail")
+    return FileResponse(path)
+
+
 @app.post("/api/load")
 async def api_load(payload: dict = Body(...)):
     video_id = payload.get("videoId", "")
     title = payload.get("title", "")
     artist = payload.get("artist", "")
+    thumbnail = payload.get("thumbnail", "")
     if not video_id:
         raise HTTPException(400, "videoId 필요")
 
@@ -223,9 +245,11 @@ async def api_load(payload: dict = Body(...)):
             def on_progress(ratio, msg):
                 _broadcast({"type": "progress", "ratio": ratio, "msg": msg})
 
-            midi_path = yt_mod.download_and_convert(video_id, _resolve_cache_dir(), on_progress)
+            cache_dir = _resolve_cache_dir()
+            midi_path = yt_mod.download_and_convert(video_id, cache_dir, on_progress)
             events, total_ms, bands = _load_events(midi_path)
             player.load(events, total_ms)
+            yt_mod.save_library_entry(cache_dir, video_id, title, artist, thumbnail)
             loaded_title = f"{title} - {artist}" if artist else title
             STATE.update(events=events, total_ms=total_ms, bands=bands, loaded_title=loaded_title)
             _broadcast({"type": "state", "loaded": True, "title": loaded_title,

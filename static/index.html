@@ -58,10 +58,31 @@
   }
   .screen.active{display:flex;}
 
-  /* ---- 검색 화면 ---- */
-  #screen-search{align-items:center; justify-content:center; gap:22px;}
-  #screen-search .hero{font-size:clamp(20px,4vw,32px); color:var(--text-dim); text-align:center;}
-  #screen-search .hero b{color:var(--text); display:block; font-size:clamp(28px,6vw,44px); margin-bottom:6px;}
+  /* ---- 주크박스 홈 ---- */
+  #screen-jukebox{align-items:center; gap:22px;}
+  #screen-jukebox .hero{font-size:clamp(15px,3vw,22px); color:var(--text-dim); text-align:center; margin-top:6px;}
+  #screen-jukebox .hero b{color:var(--text); display:block; font-size:clamp(24px,5vw,40px); margin-bottom:6px;}
+  #jb-strip{
+    display:flex; gap:24px; width:100%; overflow-x:auto; overflow-y:hidden;
+    padding:14px 4px 24px; scroll-snap-type:x proximity; align-items:flex-start;
+  }
+  .jb-card{
+    flex:0 0 auto; width:168px; display:flex; flex-direction:column; align-items:center;
+    gap:12px; background:transparent; border:none; scroll-snap-align:center; cursor:pointer;
+  }
+  .jb-coverwrap{
+    position:relative; width:168px; height:168px; border-radius:50%; overflow:hidden;
+    background:var(--panel-2); border:3px solid var(--border);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .jb-card:active .jb-coverwrap{border-color:var(--accent);}
+  .jb-note{position:absolute; font-size:58px; color:var(--text-dim);}
+  .jb-cover{position:absolute; inset:0; width:100%; height:100%; object-fit:cover;}
+  .jb-card .jb-title{font-size:15px; font-weight:600; text-align:center; width:100%;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .jb-card .jb-artist{font-size:13px; color:var(--text-dim); text-align:center; width:100%;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  #jb-empty{color:var(--text-dim); text-align:center; padding:30px 0;}
   #search-form{display:flex; gap:10px; width:min(640px, 92vw);}
   #search-input{
     flex:1; padding:18px 18px; font-size:18px; background:var(--panel-2);
@@ -123,9 +144,24 @@
   .meter .note{font-family:var(--mono); font-size:18px; font-weight:700;}
   .meter .hz{font-family:var(--mono); font-size:11px; color:var(--text-dim);}
 
-  #transport{display:flex; align-items:center; gap:12px;}
-  #transport .time{font-family:var(--mono); font-size:13px; color:var(--text-dim); min-width:52px; text-align:center;}
-  #seekbar{flex:1; accent-color:var(--accent); height:6px;}
+  #transport{display:flex; align-items:center; gap:14px;}
+  #transport .time{font-family:var(--mono); font-size:14px; color:var(--text-dim); margin-left:auto;}
+  #transport .time #time-cur{color:var(--text);}
+  /* 유튜브식 얇은 진행선 — 채워진 부분은 --pct 변수로 그린다 */
+  #seekbar{
+    -webkit-appearance:none; appearance:none; width:100%; height:5px; margin:2px 0;
+    border-radius:3px; cursor:pointer;
+    background:linear-gradient(to right,
+      var(--accent) 0%, var(--accent) var(--pct,0%),
+      var(--border) var(--pct,0%), var(--border) 100%);
+  }
+  #seekbar::-webkit-slider-thumb{
+    -webkit-appearance:none; appearance:none; width:13px; height:13px; border-radius:50%;
+    background:var(--accent); border:none; box-shadow:0 0 0 3px rgba(0,0,0,.25);
+  }
+  #seekbar::-moz-range-thumb{
+    width:13px; height:13px; border-radius:50%; background:var(--accent); border:none;
+  }
   .tbtn{
     width:52px; height:52px; border-radius:50%; border:1px solid var(--border);
     background:var(--panel-2); font-size:18px; display:flex; align-items:center; justify-content:center; flex:0 0 auto;
@@ -180,19 +216,21 @@
   </div>
 
   <div id="screens">
-    <!-- 검색 -->
-    <section id="screen-search" class="screen active">
-      <div class="hero"><b>연주할 곡을 찾아보세요</b>제목이나 아티스트를 입력하세요</div>
+    <!-- 주크박스 (홈) -->
+    <section id="screen-jukebox" class="screen active">
+      <div class="hero"><b>연주할 곡을 골라보세요</b>저장된 곡을 누르거나, 검색해서 새 곡을 받아보세요</div>
       <form id="search-form">
-        <input id="search-input" type="text" placeholder="곡 제목 또는 아티스트..." autocomplete="off">
+        <input id="search-input" type="text" placeholder="곡 제목 또는 아티스트로 검색..." autocomplete="off">
         <button class="btn btn-accent" type="submit">검색</button>
       </form>
+      <div id="jb-strip"></div>
+      <div id="jb-empty" style="display:none;">저장된 곡이 없습니다. 위에서 검색해 곡을 받아보세요.</div>
     </section>
 
     <!-- 결과 -->
     <section id="screen-results" class="screen">
       <div class="results-head">
-        <button class="btn btn-ghost" id="results-back">&larr; 검색으로</button>
+        <button class="btn btn-ghost" id="results-back">&larr; 목록으로</button>
         <span class="q" id="results-query"></span>
       </div>
       <div id="results-list"></div>
@@ -208,16 +246,15 @@
 
     <!-- 연주 -->
     <section id="screen-playing" class="screen">
-      <button class="btn btn-ghost" id="back-to-search">&larr; 새로 검색</button>
+      <button class="btn btn-ghost" id="back-to-search">&larr; 목록으로</button>
       <div id="now-playing-title">-</div>
       <div id="roll-wrap"><canvas id="rollCanvas"></canvas></div>
+      <input type="range" id="seekbar" min="0" max="1000" value="0">
       <div id="meters"></div>
       <div id="transport">
         <button class="tbtn" id="btn-playpause">&#9658;</button>
         <button class="tbtn" id="btn-stop">&#9632;</button>
-        <span class="time" id="time-cur">00:00</span>
-        <input type="range" id="seekbar" min="0" max="1000" value="0">
-        <span class="time" id="time-total">00:00</span>
+        <span class="time"><span id="time-cur">00:00</span> / <span id="time-total">00:00</span></span>
       </div>
     </section>
   </div>
@@ -326,7 +363,7 @@ function showScreen(name){
 /* ================= 모터 시각화 초기화 ================= */
 function initMotors(n){
   motorState = [];
-  for(var i=0;i<n;i++) motorState.push({segments:[], lastFreq:0});
+  for(var i=0;i<n;i++) motorState.push({lastFreq:0, eqH:0});
   renderMeterShells();
 }
 function renderMeterShells(){
@@ -356,17 +393,10 @@ function updateMeters(freqs){
   }
 }
 function onFreqs(freqs){
-  var now = performance.now();
   for(var i=0;i<freqs.length;i++){
     var m = motorState[i];
     if(!m) continue;
-    var f = freqs[i];
-    if(f !== m.lastFreq){
-      var segs = m.segments;
-      if(segs.length) segs[segs.length-1].endT = now;
-      if(f > 0) segs.push({startT: now, endT: null, freq: f});
-      m.lastFreq = f;
-    }
+    m.lastFreq = freqs[i];
   }
   updateMeters(freqs);
 }
@@ -374,8 +404,10 @@ function onFreqs(freqs){
 /* ================= 피아노롤 캔버스 ================= */
 var canvas = $("rollCanvas");
 var ctx = canvas.getContext("2d");
-var PX_PER_MS = 0.12;       // 스크롤 속도
-var HISTORY_MS = 12000;     // 보관 여유 (화면 밖 프루닝 기준)
+// 세로 막대 EQ 매핑 (참조: @local_host_audio_). 실제 주파수 가드는 펌웨어에 있다.
+var EQ_FREQ_LO = 55, EQ_FREQ_HI = 2000;   // 막대 높이 log 매핑 구간
+var EQ_DIM = "rgba(175,185,205,0.6)";   // Hz 라벨 (중립 회색)
+var EQ_MONO = "11px ui-monospace, Menlo, Consolas, monospace";
 var dpr = Math.max(1, window.devicePixelRatio || 1);
 
 function resizeCanvas(){
@@ -387,7 +419,15 @@ function resizeCanvas(){
 }
 window.addEventListener("resize", resizeCanvas);
 
-function drawRoll(){
+function freqToBarFrac(f){
+  if(!f || f <= 0) return 0;
+  var lo = Math.log(EQ_FREQ_LO), hi = Math.log(EQ_FREQ_HI);
+  return Math.max(0, Math.min(1, (Math.log(f) - lo) / (hi - lo)));
+}
+function eqColor(frac, light){   // 음높이→색: 파랑(210) → 분홍(330)
+  return "hsl(" + Math.round(210 + frac*120) + ",85%," + (light || 58) + "%)";
+}
+function drawRoll(){   // 세로 막대 이퀄라이저 (참조: @local_host_audio_)
   requestAnimationFrame(drawRoll);
   var w = canvas._cssW || 0, h = canvas._cssH || 0;
   if(w<=0 || h<=0) return;
@@ -395,58 +435,38 @@ function drawRoll(){
   ctx.clearRect(0,0,w,h);
 
   var n = motorState.length || 1;
-  var laneH = h / n;
-  var now = performance.now();
+  var padX = Math.max(12, w*0.04), padTop = h*0.08, padBot = h*0.16;
+  var plotH = h - padTop - padBot, plotW = w - padX*2;
+  var gap = Math.min(plotW*0.03, 16), barW = (plotW - gap*(n-1)) / n;
+  var baseY = padTop + plotH;
 
+  ctx.strokeStyle = "rgba(255,90,30,0.25)"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(padX, baseY+0.5); ctx.lineTo(w-padX, baseY+0.5); ctx.stroke();
+
+  ctx.font = EQ_MONO; ctx.textAlign = "center";
   for(var i=0;i<n;i++){
     var m = motorState[i];
-    var color = MOTOR_COLORS[i % MOTOR_COLORS.length];
-    var y = i*laneH;
-
-    // 화면 밖으로 완전히 나간 세그먼트 정리
-    while(m.segments.length){
-      var head = m.segments[0];
-      var headEnd = head.endT === null ? now : head.endT;
-      if((now - headEnd) * PX_PER_MS > w + 100 || (now - headEnd) > HISTORY_MS){
-        m.segments.shift();
-      } else break;
-    }
-
-    ctx.strokeStyle = "rgba(255,255,255,0.03)";
-    ctx.beginPath(); ctx.moveTo(0, y+laneH); ctx.lineTo(w, y+laneH); ctx.stroke();
-
-    for(var s=0; s<m.segments.length; s++){
-      var seg = m.segments[s];
-      var endT = seg.endT === null ? now : seg.endT;
-      var xRight = w - (now - endT) * PX_PER_MS;
-      var xLeft = w - (now - seg.startT) * PX_PER_MS;
-      if(xRight < -5 || xLeft > w+5) continue;
-      var rx = Math.max(0, xLeft), rw = Math.min(w, xRight) - rx;
-      if(rw < 1) rw = 1;
-      var barH = laneH * 0.6, barY = y + laneH*0.2;
-      ctx.fillStyle = color;
-      ctx.globalAlpha = seg.endT === null ? 1 : 0.55;
-      if(seg.endT === null){
-        ctx.shadowColor = color;
-        ctx.shadowBlur = 14;
-      } else {
-        ctx.shadowBlur = 0;
-      }
-      ctx.fillRect(rx, barY, rw, barH);
-      ctx.shadowBlur = 0;
-      ctx.globalAlpha = 1;
-    }
+    var target = freqToBarFrac(m.lastFreq);
+    if(m.eqH == null) m.eqH = 0;
+    m.eqH += (target - m.eqH) * 0.25;       // 부드러운 상승/하강 (지터 흡수)
+    var bh = Math.max(2, m.eqH * plotH);
+    var x = padX + i*(barW+gap), y = baseY - bh;
+    var on = m.lastFreq > 0;
+    ctx.fillStyle = eqColor(target);
+    ctx.globalAlpha = on ? 1 : 0.22;
+    ctx.fillRect(x, y, barW, bh);
+    if(on){ ctx.globalAlpha = 1; ctx.fillStyle = eqColor(target, 80); ctx.fillRect(x, y, barW, 2); }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = EQ_DIM;
+    ctx.fillText((m.lastFreq || 0) + " Hz", x + barW/2, baseY + 15);
   }
+}
 
-  // 현재 연주선 (우측 고정)
-  var grad = ctx.createLinearGradient(w-40, 0, w, 0);
-  grad.addColorStop(0, "rgba(255,255,255,0)");
-  grad.addColorStop(1, "rgba(255,255,255,0.10)");
-  ctx.fillStyle = grad;
-  ctx.fillRect(w-40, 0, 40, h);
-  ctx.strokeStyle = "rgba(255,255,255,0.4)";
-  ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.moveTo(w-1, 0); ctx.lineTo(w-1, h); ctx.stroke();
+/* 재생바 값(0~1000) + 채움(--pct) 동시 갱신 */
+function setSeekValue(v){
+  var sb = $("seekbar");
+  sb.value = String(v);
+  sb.style.setProperty("--pct", (v / 10) + "%");
 }
 
 /* ================= WebSocket ================= */
@@ -480,7 +500,7 @@ function handleWsMessage(msg){
     case "position":
       if(!appState.seekDragging){
         $("time-cur").textContent = fmtTime(msg.ms);
-        if(appState.totalMs > 0) $("seekbar").value = String(Math.round((msg.ms/appState.totalMs)*1000));
+        if(appState.totalMs > 0) setSeekValue(Math.round((msg.ms/appState.totalMs)*1000));
       }
       break;
     case "freqs":
@@ -497,7 +517,7 @@ function handleWsMessage(msg){
         appState.totalMs = msg.total_ms || 0;
         $("now-playing-title").textContent = msg.title || "";
         $("time-total").textContent = fmtTime(appState.totalMs);
-        $("seekbar").value = "0";
+        setSeekValue(0);
         showScreen("playing");
         resizeCanvas();
         // 로드 완료 -> 자동 재생 (박람회 키오스크 흐름)
@@ -541,8 +561,32 @@ $("search-form").addEventListener("submit", function(e){
     $("results-empty").textContent = "검색 실패: " + err.message;
   });
 });
-$("results-back").addEventListener("click", function(){ showScreen("search"); });
-$("back-to-search").addEventListener("click", function(){ showScreen("search"); });
+$("results-back").addEventListener("click", function(){ showScreen("jukebox"); loadLibrary(); });
+$("back-to-search").addEventListener("click", function(){ showScreen("jukebox"); loadLibrary(); });
+
+/* ================= 주크박스 라이브러리 ================= */
+function loadLibrary(){
+  apiGet("/api/library").then(function(items){ renderLibrary(items||[]); })
+    .catch(function(){ renderLibrary([]); });
+}
+function renderLibrary(items){
+  var strip = $("jb-strip");
+  strip.innerHTML = "";
+  $("jb-empty").style.display = items.length ? "none" : "block";
+  items.forEach(function(it){
+    var card = document.createElement("button");
+    card.className = "jb-card";
+    var src = it.hasThumb ? ("/api/thumb/" + encodeURIComponent(it.videoId)) : (it.thumbnail || "");
+    var cover = '<div class="jb-coverwrap"><span class="jb-note">&#9834;</span>' +
+      (src ? '<img class="jb-cover" src="'+escapeHtml(src)+'" onerror="this.remove()">' : '') +
+      '</div>';
+    card.innerHTML = cover +
+      '<div class="jb-title">'+escapeHtml(it.title)+'</div>' +
+      '<div class="jb-artist">'+escapeHtml(it.artist||"")+'</div>';
+    card.addEventListener("click", function(){ loadTrack(it); });
+    strip.appendChild(card);
+  });
+}
 
 function renderResults(items){
   var list = $("results-list");
@@ -578,7 +622,7 @@ function loadTrack(it){
   $("loading-bar").style.width = "0%";
   $("loading-msg").textContent = "시작 중...";
   showScreen("loading");
-  apiPost("/api/load", {videoId: it.videoId, title: it.title, artist: it.artist})
+  apiPost("/api/load", {videoId: it.videoId, title: it.title, artist: it.artist, thumbnail: it.thumbnail || ""})
     .catch(function(err){
       $("loading-msg").textContent = "실패: " + err.message;
     });
@@ -603,12 +647,13 @@ $("btn-stop").addEventListener("click", function(){
     setPlaying(false);
     appState.hasStarted = false;
     $("time-cur").textContent = "00:00";
-    $("seekbar").value = "0";
+    setSeekValue(0);
   }).catch(function(e){ logLine("정지 실패: "+e.message); });
 });
 var seekbar = $("seekbar");
 seekbar.addEventListener("input", function(){
   appState.seekDragging = true;
+  seekbar.style.setProperty("--pct", (seekbar.value/10) + "%");
   $("time-cur").textContent = fmtTime((seekbar.value/1000)*appState.totalMs);
 });
 seekbar.addEventListener("change", function(){
@@ -682,7 +727,7 @@ $("midi-file").addEventListener("change", function(){
       appState.totalMs = res.total_ms || 0;
       $("now-playing-title").textContent = f.name;
       $("time-total").textContent = fmtTime(appState.totalMs);
-      $("seekbar").value = "0";
+      setSeekValue(0);
       closeSettings();
       showScreen("playing");
       resizeCanvas();
@@ -759,6 +804,8 @@ function init(){
     initMotors(cfg.num_motors);
   }).catch(function(){ initMotors(6); });
 
+  loadLibrary();
+
   apiGet("/api/state").then(function(st){
     setSerialBadge(st.connected, st.port);
     setPlaying(st.playing);
@@ -766,8 +813,9 @@ function init(){
     $("time-total").textContent = fmtTime(appState.totalMs);
     if(st.loaded_title){
       $("now-playing-title").textContent = st.loaded_title;
-      showScreen("playing");
-      resizeCanvas();
+      // 주크박스가 홈 — 실제 재생 중일 때만 연주 화면으로. 정지된 채 로드만 된
+      // 곡이 홈을 가로채면 다음 관람객이 주크박스를 못 본다.
+      if(st.playing){ showScreen("playing"); resizeCanvas(); }
     }
   }).catch(function(e){ logLine("상태 조회 실패: " + e.message); });
 }
